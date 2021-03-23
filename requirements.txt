@@ -1,3 +1,4 @@
 jupyter
 scikit-image
 numpy
+tensorflow-gpu>=2.4.1

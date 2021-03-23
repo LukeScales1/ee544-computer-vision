@@ -14,13 +14,14 @@ def check_image_sizes(arguments):
     fldr = arguments[0]
     class_name = arguments[1]
     print(f"processing for {fldr}/{class_name}")
-    files = [f for f in os.listdir(f"{data_root}/{fldr}/{class_name}") if os.path.isfile(os.path.join(f"{data_root}/{fldr}/{class_name}", f))]
+    files = [f for f in os.listdir(f"{data_root}/{fldr}/{class_name}") if os.path.isfile(os.path.join(f"{data_root}/{fldr}/{class_name}", f)) and f != '.gitkeep']
     print(f"{len(files)} images to check")
-    for f in files[1:]:
+    for f in files:
         img = io.imread(os.path.join(f"{data_root}/{fldr}/{class_name}", f))
         shapes.append(img.shape)
     print(f"{fldr}-{class_name}, unique shapes are: {np.unique(shapes)}")
-    print(f"smallest shape in {fldr}-{class_name}: {np.min}")
+    print(f"smallest shape in {fldr}-{class_name}: {np.min(shapes)}")
+    return shapes
 
 
 if __name__ == "__main__":
@@ -32,6 +33,8 @@ if __name__ == "__main__":
     else:
         n_workers = mp.cpu_count()
     print(f"num workers = {n_workers}")
-    sizes = mp.Array()
+    sizes = []
     with mp.Pool(n_workers) as p:
-        p.map(check_image_sizes, options)
+        sizes.extend(p.map(check_image_sizes, options))
+    print(len(sizes))
+    print(f"OVERALL SMALLEST: {np.min(sizes)}")
