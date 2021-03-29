@@ -1,4 +1,5 @@
 jupyter
-scikit-image
-numpy
+scikit-image~=0.18.1
+numpy~=1.19.5
 tensorflow-gpu>=2.4.1
+matplotlib
