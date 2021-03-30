@@ -48,7 +48,7 @@ def load_data_gen(img_dims, seed=42, batch_size=32, **kwargs):
         seed=seed,
     )
     validation_generator = test_datagen.flow_from_directory(
-        directory=f"{data_fldr}/train",
+        directory=f"{data_fldr}/validation",
         target_size=img_dims,
         color_mode="grayscale",
         batch_size=batch_size,
@@ -56,7 +56,7 @@ def load_data_gen(img_dims, seed=42, batch_size=32, **kwargs):
         seed=seed,
     )
     test_generator = test_datagen.flow_from_directory(
-        directory=f"{data_fldr}/train",
+        directory=f"{data_fldr}/test",
         target_size=img_dims,
         color_mode="grayscale",
         batch_size=batch_size,
