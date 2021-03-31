@@ -103,9 +103,19 @@ def get_flops(model):
 if __name__ == "__main__":
     import load_data
     save = True
-    experiment_name = "early_stopping10"
-    early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10)
-    callbacks = [early_stop_callback]
+    experiment_name = "exponential_decay_200epoch"
+    exp_stamp = f"{experiment_name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    checkpoint_filepath = f'model_checkpoints/{exp_stamp}'
+
+    model_checkpoint = tf.keras.callbacks.ModelCheckpoint(
+        filepath=checkpoint_filepath,
+        save_weights_only=True,
+        monitor='val_loss',
+        mode='min',
+        save_best_only=True)
+    callbacks = [model_checkpoint]
+
+    # early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10)
 
     # logs = "logs/" + datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -147,12 +157,21 @@ if __name__ == "__main__":
     #         # Memory growth must be set before GPUs have been initialized
     #         print(e)
 
-    epochs = 50
     input_dims = 32
     (train_data, val_data, test_data) = load_data.load_data_gen(input_dims, seed=SEED)
-
     model = build_model(input_dims=input_dims, n_classes=len(train_data.class_indices.keys()))
-    model.compile(optimizer='adam',
+
+    epochs = 200
+    # learning_rate = 0.001
+    # decay = learning_rate/epochs
+    # lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+    #     initial_learning_rate=0.1,
+    #     decay_steps=100000,
+    #     decay_rate=0.96,
+    #     staircase=True)
+    # opt = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+    opt = tf.keras.optimizers.Adam()
+    model.compile(optimizer=opt,
                   loss=tf.keras.losses.CategoricalCrossentropy(),
                   metrics=['accuracy'])
 
@@ -163,10 +182,13 @@ if __name__ == "__main__":
         # callbacks=[tboard_callback]
         callbacks=callbacks
     )
+
+    model.load_weights(checkpoint_filepath)
+
     print_best_and_last(history)
     result = model.evaluate(test_data)
     print(f"Final test results: {dict(zip(model.metrics_names, result))}")
     plot_training(history)
     # print(f"FLOPS: {get_flops(model)}")
     if save:
-        model.save(f"saved_models/{experiment_name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+        model.save(f"saved_models/{exp_stamp}")
