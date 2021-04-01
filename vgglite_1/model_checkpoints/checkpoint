@@ -1,2 +1,2 @@
-model_checkpoint_path: "exponential_decay_200epoch-20210330-204143"
-all_model_checkpoint_paths: "exponential_decay_200epoch-20210330-204143"
+model_checkpoint_path: "image_augmentation_dropout0.1-20210331-215710"
+all_model_checkpoint_paths: "image_augmentation_dropout0.1-20210331-215710"

@@ -5,7 +5,7 @@ from datetime import datetime
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.keras.layers import Dense, Flatten, Conv2D, MaxPool2D, Input
+from tensorflow.keras.layers import Dense, Flatten, Conv2D, MaxPool2D, Input, Dropout
 from tensorflow.keras.models import Sequential
 from tensorflow.python.keras.utils.conv_utils import normalize_tuple
 import matplotlib.pyplot as plt
@@ -13,12 +13,16 @@ import matplotlib.pyplot as plt
 print(tf.__version__)
 
 SEED = 42
+
+
 # for reproducability
 def reset_random():
-  os.environ['PYTHONHASHSEED'] = str(SEED)
-  np.random.seed(SEED)
-  tf.random.set_seed(SEED)
-  random.seed(SEED)
+    os.environ['PYTHONHASHSEED'] = str(SEED)
+    np.random.seed(SEED)
+    tf.random.set_seed(SEED)
+    random.seed(SEED)
+
+
 reset_random()
 
 
@@ -45,6 +49,7 @@ def build_model(input_dims, n_classes, include_rescale=False):
     model.add(MaxPool2D(pool_size=(2, 2)))
     model.add(Flatten())
     model.add(Dense(units=512, activation='relu'))
+    model.add(Dropout(0.1, seed=SEED))
     model.add(Dense(n_classes, activation='relu'))
     return model
 
@@ -101,9 +106,10 @@ def get_flops(model):
 
 
 if __name__ == "__main__":
+    import json
     import load_data
     save = True
-    experiment_name = "exponential_decay_200epoch"
+    experiment_name = "image_augmentation_dropout0.1"
     exp_stamp = f"{experiment_name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     checkpoint_filepath = f'model_checkpoints/{exp_stamp}'
 
@@ -157,20 +163,27 @@ if __name__ == "__main__":
     #         # Memory growth must be set before GPUs have been initialized
     #         print(e)
 
+    data_gen_options = {
+        "rotation_range": 20,
+        "width_shift_range": 0.2,
+        "height_shift_range": 0.2,
+        "horizontal_flip": True
+    }
+
     input_dims = 32
-    (train_data, val_data, test_data) = load_data.load_data_gen(input_dims, seed=SEED)
+    (train_data, val_data, test_data) = load_data.load_data_gen(input_dims, seed=SEED, **data_gen_options)
     model = build_model(input_dims=input_dims, n_classes=len(train_data.class_indices.keys()))
 
-    epochs = 200
+    epochs = 500
     # learning_rate = 0.001
     # decay = learning_rate/epochs
-    # lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-    #     initial_learning_rate=0.1,
-    #     decay_steps=100000,
-    #     decay_rate=0.96,
-    #     staircase=True)
-    # opt = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
-    opt = tf.keras.optimizers.Adam()
+    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_learning_rate=0.1,
+        decay_steps=500,
+        decay_rate=0.96,
+        staircase=True)
+    opt = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+    # opt = tf.keras.optimizers.Adam()
     model.compile(optimizer=opt,
                   loss=tf.keras.losses.CategoricalCrossentropy(),
                   metrics=['accuracy'])
@@ -190,5 +203,8 @@ if __name__ == "__main__":
     print(f"Final test results: {dict(zip(model.metrics_names, result))}")
     plot_training(history)
     # print(f"FLOPS: {get_flops(model)}")
+
     if save:
         model.save(f"saved_models/{exp_stamp}")
+
+    json.dump(history.history, open(f"history_logging/{exp_stamp}", 'w'))
