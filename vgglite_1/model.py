@@ -6,6 +6,7 @@ import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
+import torch
 from tensorflow import keras
 from tensorflow.keras.layers import Dense, Flatten, Conv2D, MaxPool2D, Input, Dropout
 from tensorflow.keras.models import Sequential
@@ -15,7 +16,6 @@ from sklearn.metrics import classification_report, confusion_matrix
 print(tf.__version__)
 
 SEED = 42
-plt.style.use("dark_background")
 
 
 # for reproducability
@@ -24,6 +24,10 @@ def reset_random():
     np.random.seed(SEED)
     tf.random.set_seed(SEED)
     random.seed(SEED)
+    torch.manual_seed(SEED)
+    torch.cuda.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
+    torch.backends.cudnn.deterministic = True
 
 
 reset_random()
@@ -73,20 +77,25 @@ def build_model(input_dims, n_classes, include_rescale=False, activation_func=No
         model.add(
             keras.layers.experimental.preprocessing.Rescaling(1. / 255, input_shape=(input_dims[0], input_dims[1], 1))
         )
-        model.add(Conv2D(filters=32, kernel_size=3, padding='same', activation='relu'))
+        model.add(Conv2D(filters=32, kernel_size=3, padding='same', activation='relu',
+                         kernel_initializer=tf.keras.initializers.GlorotUniform(seed=SEED)))
     else:
         model.add(Conv2D(filters=32, kernel_size=3, padding='same', activation='relu',
-                         input_shape=(input_dims[0], input_dims[1], 1)))
+                         input_shape=(input_dims[0], input_dims[1], 1),
+                         kernel_initializer=tf.keras.initializers.GlorotUniform(seed=SEED)))
 
-    model.add(Conv2D(filters=32, kernel_size=3, padding='same', activation='relu'))
+    model.add(Conv2D(filters=32, kernel_size=3, padding='same', activation='relu',
+                     kernel_initializer=tf.keras.initializers.GlorotUniform(seed=SEED)))
     model.add(MaxPool2D(pool_size=(2, 2)))
-    model.add(Conv2D(filters=64, kernel_size=3, padding='same', activation='relu'))
-    model.add(Conv2D(filters=64, kernel_size=3, padding='same', activation='relu'))
+    model.add(Conv2D(filters=64, kernel_size=3, padding='same', activation='relu',
+                     kernel_initializer=tf.keras.initializers.GlorotUniform(seed=SEED)))
+    model.add(Conv2D(filters=64, kernel_size=3, padding='same', activation='relu',
+                     kernel_initializer=tf.keras.initializers.GlorotUniform(seed=SEED)))
     model.add(MaxPool2D(pool_size=(2, 2)))
     model.add(Flatten())
-    model.add(Dense(units=512, activation='relu'))
+    model.add(Dense(units=512, activation='relu', kernel_initializer=tf.keras.initializers.GlorotUniform(seed=SEED)))
     # model.add(Dropout(0.4, seed=SEED))
-    model.add(Dense(n_classes, activation='relu'))
+    model.add(Dense(n_classes, activation='relu', kernel_initializer=tf.keras.initializers.GlorotUniform(seed=SEED)))
     return model
 
 
@@ -100,7 +109,7 @@ def plot_training(h):
     # epochs_range = range(epochs)
     epochs_range = h.epoch
 
-    # plt.style.use("dark_background")
+    plt.style.use("dark_background")
 
     plt.figure(figsize=(8, 8))
     plt.subplot(1, 2, 1)
@@ -128,8 +137,9 @@ def plot_confusion_matrix(cm, class_names):
         cm (array, shape = [n, n]): a confusion matrix of integer classes
         class_names (array, shape = [n]): String names of the integer classes
       """
-    figure = plt.figure(figsize=(8, 8))
+    plt.figure(figsize=(8, 8))
 
+    plt.style.use("dark_background")
     plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
     plt.title("Confusion matrix")
     plt.colorbar()
@@ -149,6 +159,7 @@ def plot_confusion_matrix(cm, class_names):
         plt.tight_layout()
         plt.ylabel('True label')
         plt.xlabel('Predicted label')
+    plt.show()
 
 
 def print_best_and_last(h):
@@ -177,8 +188,8 @@ if __name__ == "__main__":
     import json
     import load_data
 
-    save = False
-    experiment_name = "baseline_sanity_check"
+    save = True
+    experiment_name = "baseline_244"
     exp_stamp = f"{experiment_name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     checkpoint_filepath = f'model_checkpoints/{exp_stamp}'
 
@@ -188,14 +199,13 @@ if __name__ == "__main__":
         monitor='val_loss',
         mode='min',
         save_best_only=True)
-
+    # logdir = f"logs/{exp_stamp}"
+    # tboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir)
     # early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=50)
 
     callbacks = [model_checkpoint]
 
-    # logdir = f"logs/{exp_stamp}"
-    #
-    # tboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir)
+
 
     # tf.config.set_soft_device_placement(True)
     # tf.debugging.set_log_device_placement(True)
@@ -233,11 +243,15 @@ if __name__ == "__main__":
         # use this alone to *not* augment the dataset and train/test models quicker - for prototyping
     }
 
-    input_dims = 32
-    (train_data, val_data, test_data) = load_data.load_data_gen(input_dims, seed=SEED, **data_gen_options)
-    model = build_model(input_dims=input_dims, n_classes=len(train_data.class_indices.keys()))
+    reset_random()
 
-    epochs = 50
+    input_dims = 244
+    (train_data, val_data, test_data) = load_data.load(input_dims)
+    model = build_model(input_dims, n_classes=len(train_data.class_names), include_rescale=True)
+    # (train_data, val_data, test_data) = load_data.load_data_gen(input_dims, seed=SEED, shuffle=True, **data_gen_options)
+    # model = build_model(input_dims=input_dims, n_classes=len(train_data.class_indices.keys()))
+
+    epochs = 10
     # learning_rate = 0.001
     # decay = learning_rate/epochs
     # lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
@@ -250,6 +264,8 @@ if __name__ == "__main__":
     model.compile(optimizer=opt,
                   loss=tf.keras.losses.CategoricalCrossentropy(),
                   metrics=['accuracy'])
+
+    reset_random()
 
     history = model.fit(
         train_data,

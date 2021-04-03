@@ -30,7 +30,7 @@ def load(img_dims):
     )
 
 
-def load_data_gen(img_dims, seed=42, batch_size=32, **kwargs):
+def load_data_gen(img_dims, seed=42, batch_size=32, shuffle=True, **kwargs):
     if img_dims is None:
         img_dims = (244, 244)  # default to VGG-16 input dimensions
     else:
@@ -46,6 +46,7 @@ def load_data_gen(img_dims, seed=42, batch_size=32, **kwargs):
         batch_size=batch_size,
         class_mode="categorical",
         seed=seed,
+        shuffle=shuffle
     )
     validation_generator = test_datagen.flow_from_directory(
         directory=f"{data_fldr}/validation",
@@ -54,6 +55,7 @@ def load_data_gen(img_dims, seed=42, batch_size=32, **kwargs):
         batch_size=batch_size,
         class_mode="categorical",
         seed=seed,
+        shuffle=shuffle
     )
     test_generator = test_datagen.flow_from_directory(
         directory=f"{data_fldr}/test",
