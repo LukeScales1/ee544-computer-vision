@@ -61,6 +61,7 @@ def load_data_gen(img_dims, seed=42, batch_size=32, **kwargs):
         color_mode="grayscale",
         batch_size=batch_size,
         class_mode="categorical",
+        shuffle=False
     )
     return train_generator, validation_generator, test_generator
 

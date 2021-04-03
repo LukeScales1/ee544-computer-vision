@@ -1,18 +1,21 @@
 import os
 import random
 from datetime import datetime
+import itertools
 
 import numpy as np
+import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.layers import Dense, Flatten, Conv2D, MaxPool2D, Input, Dropout
 from tensorflow.keras.models import Sequential
 from tensorflow.python.keras.utils.conv_utils import normalize_tuple
-import matplotlib.pyplot as plt
+from sklearn.metrics import classification_report, confusion_matrix
 
 print(tf.__version__)
 
 SEED = 42
+plt.style.use("dark_background")
 
 
 # for reproducability
@@ -26,11 +29,44 @@ def reset_random():
 reset_random()
 
 
-def build_model(input_dims, n_classes, include_rescale=False):
+def baseline_model(input_dims, n_classes, include_rescale=False):
     if input_dims is None:
         input_dims = (244, 244)  # default to VGG-16 input dimensions
     else:
         input_dims = normalize_tuple(value=input_dims, n=2, name="input_dims")
+    model = Sequential(name="VGG-liter-baseline")
+    if include_rescale:
+        # to support using tf.keras.preprocessing.image_dataset_from_directory which doesn't have rescale built in
+        model.add(
+            keras.layers.experimental.preprocessing.Rescaling(1. / 255, input_shape=(input_dims[0], input_dims[1], 1))
+        )
+        model.add(Conv2D(filters=32, kernel_size=3, padding='same', activation='relu'))
+    else:
+        model.add(Conv2D(filters=32, kernel_size=3, padding='same', activation='relu',
+                         input_shape=(input_dims[0], input_dims[1], 1)))
+
+    model.add(Conv2D(filters=32, kernel_size=3, padding='same', activation='relu'))
+    model.add(MaxPool2D(pool_size=(2, 2)))
+    model.add(Conv2D(filters=64, kernel_size=3, padding='same', activation='relu'))
+    model.add(Conv2D(filters=64, kernel_size=3, padding='same', activation='relu'))
+    model.add(MaxPool2D(pool_size=(2, 2)))
+    model.add(Flatten())
+    model.add(Dense(units=512, activation='relu'))
+    model.add(Dense(n_classes, activation='relu'))
+    return model
+
+
+def build_model(input_dims, n_classes, include_rescale=False, activation_func=None, output_activation=None, dropout=None):
+    if input_dims is None:
+        input_dims = (244, 244)  # default to VGG-16 input dimensions
+    else:
+        input_dims = normalize_tuple(value=input_dims, n=2, name="input_dims")
+
+    if activation_func is None:
+        activation_func = "relu"
+    if output_activation is None:
+        output_activation = "relu"
+
     model = Sequential(name="VGG-liter")
     if include_rescale:
         # to support using tf.keras.preprocessing.image_dataset_from_directory which doesn't have rescale built in
@@ -49,7 +85,7 @@ def build_model(input_dims, n_classes, include_rescale=False):
     model.add(MaxPool2D(pool_size=(2, 2)))
     model.add(Flatten())
     model.add(Dense(units=512, activation='relu'))
-    model.add(Dropout(0.1, seed=SEED))
+    # model.add(Dropout(0.4, seed=SEED))
     model.add(Dense(n_classes, activation='relu'))
     return model
 
@@ -64,7 +100,7 @@ def plot_training(h):
     # epochs_range = range(epochs)
     epochs_range = h.epoch
 
-    plt.style.use("dark_background")
+    # plt.style.use("dark_background")
 
     plt.figure(figsize=(8, 8))
     plt.subplot(1, 2, 1)
@@ -81,6 +117,38 @@ def plot_training(h):
     plt.title('Training and Validation Loss')
     # plt.setp(title, color='w')
     plt.show()
+
+
+def plot_confusion_matrix(cm, class_names):
+    """
+    Credit to the Tensorflow Team, from https://www.tensorflow.org/tensorboard/image_summaries
+      Returns a matplotlib figure containing the plotted confusion matrix.
+
+      Args:
+        cm (array, shape = [n, n]): a confusion matrix of integer classes
+        class_names (array, shape = [n]): String names of the integer classes
+      """
+    figure = plt.figure(figsize=(8, 8))
+
+    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    plt.title("Confusion matrix")
+    plt.colorbar()
+    tick_marks = np.arange(len(class_names))
+    plt.xticks(tick_marks, class_names, rotation=45)
+    plt.yticks(tick_marks, class_names)
+
+    # Compute the labels from the normalized confusion matrix.
+    labels = np.around(cm.astype('float') / cm.sum(axis=1)[:, np.newaxis], decimals=2)
+
+    # Use white text if squares are dark; otherwise black.
+    threshold = cm.max() / 2.
+    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+        color = "white" if cm[i, j] > threshold else "black"
+        plt.text(j, i, labels[i, j], horizontalalignment="center", color=color)
+
+        plt.tight_layout()
+        plt.ylabel('True label')
+        plt.xlabel('Predicted label')
 
 
 def print_best_and_last(h):
@@ -108,8 +176,9 @@ def get_flops(model):
 if __name__ == "__main__":
     import json
     import load_data
-    save = True
-    experiment_name = "image_augmentation_dropout0.1"
+
+    save = False
+    experiment_name = "baseline_sanity_check"
     exp_stamp = f"{experiment_name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     checkpoint_filepath = f'model_checkpoints/{exp_stamp}'
 
@@ -119,24 +188,14 @@ if __name__ == "__main__":
         monitor='val_loss',
         mode='min',
         save_best_only=True)
+
+    # early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=50)
+
     callbacks = [model_checkpoint]
 
-    # early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10)
-
-    # logs = "logs/" + datetime.now().strftime("%Y%m%d-%H%M%S")
-
-    # tboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logs,
-    #                                                  histogram_freq=1,
-    #                                                  profile_batch='500,520')
-
-    # Failed attempts at getting tf 2.4.1 to work with latest CUDA drivers
-    # gpu_devices = tf.config.list_physical_devices('GPU')
-    # if not gpu_devices:
-    #     raise ValueError('Cannot detect physical GPU device in TF')
-    # device_name = tf.test.gpu_device_name()
-    # if not device_name:
-    #     raise SystemError('GPU device not found')
-    # print('Found GPU at: {}'.format(device_name))
+    # logdir = f"logs/{exp_stamp}"
+    #
+    # tboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir)
 
     # tf.config.set_soft_device_placement(True)
     # tf.debugging.set_log_device_placement(True)
@@ -163,27 +222,31 @@ if __name__ == "__main__":
     #         # Memory growth must be set before GPUs have been initialized
     #         print(e)
 
+    # data_gen_options = {
+    #     "rotation_range": 20,
+    #     "width_shift_range": 0.2,
+    #     "height_shift_range": 0.2,
+    #     "horizontal_flip": True
+    # }
     data_gen_options = {
-        "rotation_range": 20,
-        "width_shift_range": 0.2,
-        "height_shift_range": 0.2,
-        "horizontal_flip": True
+        "rescale": 1. / 255
+        # use this alone to *not* augment the dataset and train/test models quicker - for prototyping
     }
 
     input_dims = 32
     (train_data, val_data, test_data) = load_data.load_data_gen(input_dims, seed=SEED, **data_gen_options)
     model = build_model(input_dims=input_dims, n_classes=len(train_data.class_indices.keys()))
 
-    epochs = 500
+    epochs = 50
     # learning_rate = 0.001
     # decay = learning_rate/epochs
-    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-        initial_learning_rate=0.1,
-        decay_steps=500,
-        decay_rate=0.96,
-        staircase=True)
-    opt = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
-    # opt = tf.keras.optimizers.Adam()
+    # lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+    #     initial_learning_rate=0.01,
+    #     decay_steps=1500,
+    #     decay_rate=0.96,
+    #     staircase=True)
+    # opt = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+    opt = tf.keras.optimizers.Adam()
     model.compile(optimizer=opt,
                   loss=tf.keras.losses.CategoricalCrossentropy(),
                   metrics=['accuracy'])
@@ -199,12 +262,18 @@ if __name__ == "__main__":
     model.load_weights(checkpoint_filepath)
 
     print_best_and_last(history)
+    val_result = model.evaluate(val_data)
+    print(f"Final validation results: {dict(zip(model.metrics_names, val_result))}")
     result = model.evaluate(test_data)
     print(f"Final test results: {dict(zip(model.metrics_names, result))}")
     plot_training(history)
     # print(f"FLOPS: {get_flops(model)}")
+    Y_pred = model.predict(test_data)
+    y_pred = np.argmax(Y_pred, axis=1)
+    cm = confusion_matrix(test_data.classes, y_pred)
+    print(classification_report(test_data.classes, y_pred, target_names=test_data.class_indices.keys()))
+    plot_confusion_matrix(cm, test_data.class_indices.keys())
 
     if save:
         model.save(f"saved_models/{exp_stamp}")
-
-    json.dump(history.history, open(f"history_logging/{exp_stamp}", 'w'))
+        json.dump(history.history, open(f"history_logging/{exp_stamp}", 'w'))
