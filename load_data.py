@@ -1,6 +1,8 @@
 import tensorflow as tf
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.python.keras.utils.conv_utils import normalize_tuple
+from tensorflow.keras.applications import imagenet_utils
+
 import utils
 
 
@@ -36,6 +38,7 @@ def load_data_gen(task, img_dims, seed=42, batch_size=32, shuffle=True, **kwargs
         kwargs["rescale"] = 1./255
 
     val_kwargs = {"rescale": 1./255}
+    test_kwargs = {"rescale": 1./255}
 
     def get_default_flow_kwargs(ddir, color="grayscale", **dkwargs):
         return {
@@ -62,13 +65,19 @@ def load_data_gen(task, img_dims, seed=42, batch_size=32, shuffle=True, **kwargs
     elif task == 2:
         data_fldr = utils.data_fldr + "/imagewoof-320"
         kwargs["validation_split"] = 0.1
+        kwargs["dtype"] = float
+        kwargs["preprocessing_function"] = imagenet_utils.preprocess_input
         val_kwargs["validation_split"] = 0.1
+        val_kwargs["dtype"] = float
+        val_kwargs["preprocessing_function"] = imagenet_utils.preprocess_input
+        test_kwargs["dtype"] = float
+        test_kwargs["preprocessing_function"] = imagenet_utils.preprocess_input
 
         train_dir = f"{data_fldr}/train"
-        train_flow_kwargs = get_default_flow_kwargs(train_dir, color="rgb", shuffle=shuffle)
+        train_flow_kwargs = get_default_flow_kwargs(train_dir, color="rgb", shuffle=shuffle, subset="training")
 
         val_dir = f"{data_fldr}/train"
-        val_flow_kwargs = get_default_flow_kwargs(val_dir, color="rgb", shuffle=shuffle)
+        val_flow_kwargs = get_default_flow_kwargs(val_dir, color="rgb", shuffle=shuffle, subset="validation")
 
         test_dir = f"{data_fldr}/val"
         test_flow_kwargs = get_default_flow_kwargs(test_dir, color="rgb", shuffle=False)
@@ -78,7 +87,7 @@ def load_data_gen(task, img_dims, seed=42, batch_size=32, shuffle=True, **kwargs
 
     train_datagen = ImageDataGenerator(**kwargs)
     val_datagen = ImageDataGenerator(**val_kwargs)
-    test_datagen = ImageDataGenerator(rescale=kwargs["rescale"])
+    test_datagen = ImageDataGenerator(**test_kwargs)
     train_generator = train_datagen.flow_from_directory(**train_flow_kwargs)
     validation_generator = val_datagen.flow_from_directory(**val_flow_kwargs)
     test_generator = test_datagen.flow_from_directory(**test_flow_kwargs)
