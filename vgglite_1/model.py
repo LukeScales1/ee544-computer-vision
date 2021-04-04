@@ -92,7 +92,7 @@ def build_model(input_dims, n_classes, include_rescale=False, activation_func=No
         model.add(BatchNormalization(axis=-1))
     model.add(MaxPool2D(pool_size=(2, 2)))
     if dropout:
-        model.add(Dropout(0.2, seed=SEED))
+        model.add(Dropout(0.25, seed=SEED))
     model.add(Conv2D(filters=64, kernel_size=3, padding='same', activation=activation_func,
                      kernel_initializer=tf.keras.initializers.GlorotUniform(seed=SEED)))
     if batch_norm:
@@ -207,7 +207,7 @@ if __name__ == "__main__":
     output_activation = 'softmax'
     use_dropout = True
     use_batch_norm = True
-    experiment_name = "image_aug_lrschedule_elu_softmax_dropout_batchnorm"
+    experiment_name = "image_aug_lrschedule_elu_softmax_dropout0.25-0.5_batchnorm"
 
     epochs = 500
     # learning_rate = 0.001
@@ -231,7 +231,7 @@ if __name__ == "__main__":
         save_best_only=True)
     # logdir = f"logs/{exp_stamp}"
     # tboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir)
-    early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=50)
+    early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=100)
 
     callbacks = [model_checkpoint, early_stop_callback]
 
@@ -300,6 +300,7 @@ if __name__ == "__main__":
 
     model.load_weights(checkpoint_filepath)
 
+    print(experiment_name)
     print_best_and_last(history)
     val_result = model.evaluate(val_data)
     print(f"Final validation results: {dict(zip(model.metrics_names, val_result))}")

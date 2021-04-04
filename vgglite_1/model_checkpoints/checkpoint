@@ -1,2 +1,2 @@
-model_checkpoint_path: "image_aug_lrschedule_swish_softmax_dropout_batchnorm-20210403-155542"
-all_model_checkpoint_paths: "image_aug_lrschedule_swish_softmax_dropout_batchnorm-20210403-155542"
+model_checkpoint_path: "image_aug_lrschedule_elu_softmax_dropout0.5-0.5_batchnorm-20210403-221411"
+all_model_checkpoint_paths: "image_aug_lrschedule_elu_softmax_dropout0.5-0.5_batchnorm-20210403-221411"
