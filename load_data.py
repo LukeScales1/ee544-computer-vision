@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.python.keras.utils.conv_utils import normalize_tuple
-from tensorflow.keras.applications import imagenet_utils
+from tensorflow.keras.applications.resnet50 import preprocess_input
 
 import utils
 
@@ -34,63 +34,82 @@ def load_data_gen(task, img_dims, seed=42, batch_size=32, shuffle=True, **kwargs
         img_dims = (244, 244)  # default to ResNet50 default input dimensions
     else:
         img_dims = normalize_tuple(value=img_dims, n=2, name="input_dims")
-    if "rescale" not in kwargs.keys():
-        kwargs["rescale"] = 1./255
 
-    val_kwargs = {"rescale": 1./255}
-    test_kwargs = {"rescale": 1./255}
+    train_generator, validation_generator, test_generator = None, None, None
 
-    def get_default_flow_kwargs(ddir, color="grayscale", **dkwargs):
-        return {
-            "directory": ddir,
-            "target_size": img_dims,
-            "color_mode": color,
-            "batch_size": batch_size,
-            "class_mode": "categorical",
-            "seed": seed,
-            **dkwargs
-        }
+    # def get_default_flow_kwargs(ddir, color="grayscale", **dkwargs):
+    #     return {
+    #         "directory": ddir,
+    #         "target_size": img_dims,
+    #         "color_mode": color,
+    #         "batch_size": batch_size,
+    #         "class_mode": "categorical",
+    #         "seed": seed,
+    #         **dkwargs
+    #     }
 
     if task == 1:
+        if "rescale" not in kwargs.keys():
+            kwargs["rescale"] = 1. / 255
         data_fldr = utils.data_fldr + "/imagenette_4class"
-        train_dir = f"{data_fldr}/train"
-        train_flow_kwargs = get_default_flow_kwargs(train_dir, shuffle=shuffle)
-
-        val_dir = f"{data_fldr}/validation"
-        val_flow_kwargs = get_default_flow_kwargs(val_dir, shuffle=shuffle)
-
-        test_dir = f"{data_fldr}/test"
-        test_flow_kwargs = get_default_flow_kwargs(test_dir, shuffle=False)
+        train_datagen = ImageDataGenerator(**kwargs)
+        train_generator = train_datagen.flow_from_directory(
+            f"{data_fldr}/train",
+            batch_size=batch_size,
+            target_size=img_dims,
+            color_mode="grayscale",
+            shuffle=True,
+            seed=seed,
+            class_mode='categorical')
+        test_datagen = ImageDataGenerator(rescale=kwargs["rescale"])
+        validation_generator = test_datagen.flow_from_directory(
+            f"{data_fldr}/validation",
+            batch_size=batch_size,
+            target_size=img_dims,
+            color_mode="grayscale",
+            shuffle=True,
+            seed=seed,
+            class_mode='categorical')
+        test_datagen = ImageDataGenerator(rescale=kwargs["rescale"])
+        test_generator = test_datagen.flow_from_directory(
+            f"{data_fldr}/test",
+            batch_size=batch_size,
+            target_size=img_dims,
+            color_mode="grayscale",
+            shuffle=False,
+            class_mode='categorical')
 
     elif task == 2:
         data_fldr = utils.data_fldr + "/imagewoof-320"
-        kwargs["validation_split"] = 0.1
-        kwargs["dtype"] = float
-        kwargs["preprocessing_function"] = imagenet_utils.preprocess_input
-        val_kwargs["validation_split"] = 0.1
-        val_kwargs["dtype"] = float
-        val_kwargs["preprocessing_function"] = imagenet_utils.preprocess_input
-        test_kwargs["dtype"] = float
-        test_kwargs["preprocessing_function"] = imagenet_utils.preprocess_input
-
-        train_dir = f"{data_fldr}/train"
-        train_flow_kwargs = get_default_flow_kwargs(train_dir, color="rgb", shuffle=shuffle, subset="training")
-
-        val_dir = f"{data_fldr}/train"
-        val_flow_kwargs = get_default_flow_kwargs(val_dir, color="rgb", shuffle=shuffle, subset="validation")
-
-        test_dir = f"{data_fldr}/val"
-        test_flow_kwargs = get_default_flow_kwargs(test_dir, color="rgb", shuffle=False)
+        train_datagen = ImageDataGenerator(preprocessing_function=preprocess_input, validation_split=0.1)
+        train_generator = train_datagen.flow_from_directory(
+            f"{data_fldr}/train",
+            batch_size=batch_size,
+            target_size=img_dims,
+            shuffle=True,
+            seed=seed,
+            subset="training",
+            class_mode='categorical')
+        test_datagen = ImageDataGenerator(preprocessing_function=preprocess_input, validation_split=0.1)
+        validation_generator = test_datagen.flow_from_directory(
+            f"{data_fldr}/train",
+            batch_size=batch_size,
+            target_size=img_dims,
+            shuffle=True,
+            seed=seed,
+            subset="validation",
+            class_mode='categorical')
+        test_datagen = ImageDataGenerator(preprocessing_function=preprocess_input)
+        test_generator = test_datagen.flow_from_directory(
+            f"{data_fldr}/val",
+            batch_size=batch_size,
+            target_size=img_dims,
+            shuffle=False,
+            class_mode='categorical')
 
     elif task == 3:
-        data_fldr = utils.data_fldr + "/imagewoof-320"
+        data_fldr = utils.data_fldr + "/oxford-iit-pet"
 
-    train_datagen = ImageDataGenerator(**kwargs)
-    val_datagen = ImageDataGenerator(**val_kwargs)
-    test_datagen = ImageDataGenerator(**test_kwargs)
-    train_generator = train_datagen.flow_from_directory(**train_flow_kwargs)
-    validation_generator = val_datagen.flow_from_directory(**val_flow_kwargs)
-    test_generator = test_datagen.flow_from_directory(**test_flow_kwargs)
     return train_generator, validation_generator, test_generator
 
 
