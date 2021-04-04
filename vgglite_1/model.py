@@ -280,7 +280,7 @@ if __name__ == "__main__":
     input_dims = 32
     # (train_data, val_data, test_data) = load_data.load(input_dims)
     # model = build_model(input_dims, n_classes=len(train_data.class_names), include_rescale=True)
-    (train_data, val_data, test_data) = load_data.load_data_gen(input_dims, seed=SEED, shuffle=True, **data_gen_options)
+    (train_data, val_data, test_data) = load_data.load_data_gen(task=1, img_dims=input_dims, seed=SEED, shuffle=True, **data_gen_options)
     model = build_model(input_dims=input_dims, n_classes=len(train_data.class_indices.keys()),
                         activation_func=activation, output_activation=output_activation)
 
