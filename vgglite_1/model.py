@@ -13,6 +13,11 @@ from tensorflow.keras.models import Sequential
 from tensorflow.python.keras.utils.conv_utils import normalize_tuple
 from sklearn.metrics import classification_report, confusion_matrix
 
+# from keras_flops import get_flops
+
+import utils
+import load_data
+
 print(tf.__version__)
 
 SEED = 42
@@ -112,104 +117,18 @@ def build_model(input_dims, n_classes, include_rescale=False, activation_func=No
     return model
 
 
-def plot_training(h):
-    acc = h.history['accuracy']
-    val_acc = h.history['val_accuracy']
-
-    loss = h.history['loss']
-    val_loss = h.history['val_loss']
-
-    # epochs_range = range(epochs)
-    epochs_range = h.epoch
-
-    plt.style.use("dark_background")
-
-    plt.figure(figsize=(8, 8))
-    plt.subplot(1, 2, 1)
-    plt.plot(epochs_range[0:len(acc)], acc, label='Training Accuracy')
-    plt.plot(epochs_range[0:len(val_acc)], val_acc, label='Validation Accuracy')
-    plt.legend(loc='lower right')
-    plt.title('Training and Validation Accuracy')
-    # plt.setp(title, color='w')
-
-    plt.subplot(1, 2, 2)
-    plt.plot(epochs_range[0:len(loss)], loss, label='Training Loss')
-    plt.plot(epochs_range[0:len(val_loss)], val_loss, label='Validation Loss')
-    plt.legend(loc='upper right')
-    plt.title('Training and Validation Loss')
-    # plt.setp(title, color='w')
-    plt.show()
-
-
-def plot_confusion_matrix(cm, class_names):
-    """
-    Credit to the Tensorflow Team, from https://www.tensorflow.org/tensorboard/image_summaries
-      Returns a matplotlib figure containing the plotted confusion matrix.
-
-      Args:
-        cm (array, shape = [n, n]): a confusion matrix of integer classes
-        class_names (array, shape = [n]): String names of the integer classes
-      """
-    plt.figure(figsize=(8, 8))
-
-    plt.style.use("dark_background")
-    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-    plt.title("Confusion matrix")
-    plt.colorbar()
-    tick_marks = np.arange(len(class_names))
-    plt.xticks(tick_marks, class_names, rotation=45)
-    plt.yticks(tick_marks, class_names)
-
-    # Compute the labels from the normalized confusion matrix.
-    labels = np.around(cm.astype('float') / cm.sum(axis=1)[:, np.newaxis], decimals=2)
-
-    # Use white text if squares are dark; otherwise black.
-    threshold = cm.max() / 2.
-    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        color = "white" if cm[i, j] > threshold else "black"
-        plt.text(j, i, labels[i, j], horizontalalignment="center", color=color)
-
-        plt.tight_layout()
-        plt.ylabel('True label')
-        plt.xlabel('Predicted label')
-    plt.show()
-
-
-def print_best_and_last(h):
-    print(f"Final training loss: {h.history['loss'][-1]}")
-    print(f"Final training acc: {h.history['accuracy'][-1]}")
-    print(f"Final validation loss: {h.history['val_loss'][-1]}")
-    print(f"Final validation acc: {h.history['val_accuracy'][-1]}")
-    print(f"Best training loss: {np.min(h.history['loss'])}")
-    print(f"Best training acc: {np.max(h.history['accuracy'])}")
-    print(f"Best validation loss: {np.min(h.history['val_loss'])}")
-    print(f"Best validation acc: {np.max(h.history['val_accuracy'])}")
-
-
-def get_flops(model):
-    import tensorflow.python.keras.backend as K
-    run_meta = tf.compat.v1.RunMetadata()
-    opts = tf.compat.v1.profiler.ProfileOptionBuilder.float_operation()
-
-    # We use the Keras session graph in the call to the profiler.
-    flops = tf.compat.v1.profiler.profile(graph=K.get_session().graph, run_meta=run_meta, cmd='op', options=opts)
-
-    return flops.total_float_ops
-
-
 if __name__ == "__main__":
     import json
-    import load_data
 
     # EXPERIMENT CONFIG #
-    save = True
+    save = False
     activation = 'elu'
     output_activation = 'softmax'
     use_dropout = True
     use_batch_norm = True
     experiment_name = "image_aug_lrschedule_elu_softmax_dropout0.25-0.5_batchnorm"
 
-    epochs = 500
+    epochs = 5
     # learning_rate = 0.001
     # decay = learning_rate/epochs
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
@@ -233,9 +152,7 @@ if __name__ == "__main__":
     # tboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir)
     early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=100)
 
-    callbacks = [model_checkpoint, early_stop_callback]
-
-
+    callbacks = []
 
     # tf.config.set_soft_device_placement(True)
     # tf.debugging.set_log_device_placement(True)
@@ -298,21 +215,21 @@ if __name__ == "__main__":
         callbacks=callbacks
     )
 
-    model.load_weights(checkpoint_filepath)
+    # model.load_weights(checkpoint_filepath)
 
     print(experiment_name)
-    print_best_and_last(history)
+    utils.print_best_and_last(history)
     val_result = model.evaluate(val_data)
     print(f"Final validation results: {dict(zip(model.metrics_names, val_result))}")
     result = model.evaluate(test_data)
     print(f"Final test results: {dict(zip(model.metrics_names, result))}")
-    plot_training(history)
+    utils.plot_training(history)
     # print(f"FLOPS: {get_flops(model)}")
     Y_pred = model.predict(test_data)
     y_pred = np.argmax(Y_pred, axis=1)
     cm = confusion_matrix(test_data.classes, y_pred)
     print(classification_report(test_data.classes, y_pred, target_names=test_data.class_indices.keys()))
-    plot_confusion_matrix(cm, test_data.class_indices.keys())
+    utils.plot_confusion_matrix(cm, test_data.class_indices.keys())
 
     if save:
         model.save(f"saved_models/{exp_stamp}")
