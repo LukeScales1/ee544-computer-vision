@@ -122,7 +122,7 @@ if __name__ == "__main__":
     print(classification_report(test_data.classes, y_pred, target_names=test_data.class_indices.keys()))
     utils.plot_confusion_matrix(cm, test_data.class_indices.keys())
 
-    model.save(f"saved_models/initial_imbalanced")
+    model.save(f"saved_models/initial_imbalanced_2")
 
     # Step 2 - unfreeze res5c block and retrain final layers and added classifier
     resnet.trainable = True
