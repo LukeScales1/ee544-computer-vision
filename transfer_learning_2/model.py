@@ -99,9 +99,32 @@ if __name__ == "__main__":
     model = Model(inputs=resnet.input, outputs=class_model)
 
     # load data with resnet preprocessing function
-    (train_data, val_data, test_data) = load_data.load_data_gen(task=2, img_dims=244)
+    # (train_data, val_data, test_data) = load_data.load_data_gen(task=2, img_dims=244)
+    # second run - balancing classes via weights and augmenting data to fight overfitting, updating batch size:
+    BATCH_SIZE = 124
+    class_weight = {
+        0: 1.,
+        1: 1.,
+        2: 1.,
+        3: 1.,
+        4: 1.73,
+        5: 1.,
+        6: 1.,
+        7: 1.,
+        8: 1.,
+        9: 1.,
+    }
+    data_gen_params = {
+        "rotation_range": 40,
+        "width_shift_range": 0.2,
+        "height_shift_range": 0.2,
+        "shear_range": 0.2,
+        "zoom_range": 0.2,
+        "horizontal_flip": True,
+    }
+    (train_data, val_data, test_data) = load_data.load_data_gen(task=2, img_dims=244, batch_size=BATCH_SIZE, **data_gen_params)
 
-    opt = tf.keras.optimizers.Adam()
+    opt = tf.keras.optimizers.Adam(lr=2e-5)
     model.compile(optimizer=opt,
                   loss=tf.keras.losses.CategoricalCrossentropy(),
                   metrics=['accuracy'])
@@ -109,6 +132,7 @@ if __name__ == "__main__":
         train_data,
         validation_data=val_data,
         epochs=30,
+        class_weight=class_weight
     )
     # save initial model and log results
     val_result = model.evaluate(val_data)
@@ -122,7 +146,7 @@ if __name__ == "__main__":
     print(classification_report(test_data.classes, y_pred, target_names=test_data.class_indices.keys()))
     utils.plot_confusion_matrix(cm, test_data.class_indices.keys())
 
-    model.save(f"saved_models/initial_imbalanced_2")
+    model.save(f"saved_models/initial_balanced")
 
     # Step 2 - unfreeze res5c block and retrain final layers and added classifier
     resnet.trainable = True
@@ -142,7 +166,13 @@ if __name__ == "__main__":
     # as per Chollet's advice, v small learning rate when fine-tuning
     # https://nbviewer.jupyter.org/github/fchollet/deep-learning-with-python-notebooks/blob/master/5.3-using-a-pretrained-convnet.ipynb
 
-    model.compile(optimizer=tf.keras.optimizers.RMSprop(lr=1e-5),
+    # model.compile(optimizer=tf.keras.optimizers.RMSprop(lr=1e-5),
+    #               loss=tf.keras.losses.CategoricalCrossentropy(),
+    #               metrics=['accuracy'])
+
+    # second pass - using Adam as less affected by class_weights changing range of the loss
+    # ref: https://www.tensorflow.org/tutorials/structured_data/imbalanced_data#train_a_model_with_class_weights
+    model.compile(optimizer=tf.keras.optimizers.Adam(lr=1e-3),
                   loss=tf.keras.losses.CategoricalCrossentropy(),
                   metrics=['accuracy'])
 
@@ -150,6 +180,7 @@ if __name__ == "__main__":
         train_data,
         validation_data=val_data,
         epochs=100,
+        class_weight=class_weight
     )
 
     test_data.reset()
@@ -166,4 +197,4 @@ if __name__ == "__main__":
     print(classification_report(test_data.classes, y_pred, target_names=test_data.class_indices.keys()))
     utils.plot_confusion_matrix(cm, test_data.class_indices.keys())
 
-    model.save(f"saved_models/fine-tuned_imbalanced")
+    model.save(f"saved_models/fine-tuned_balanced")
