@@ -83,7 +83,7 @@ def load_data_gen(task, img_dims, seed=42, batch_size=32, shuffle=True, **kwargs
         data_fldr = utils.data_fldr + "/imagewoof-320"
         train_datagen = ImageDataGenerator(preprocessing_function=preprocess_input, validation_split=0.1, **kwargs)
         train_generator = train_datagen.flow_from_directory(
-            f"{data_fldr}/train",
+            f"{data_fldr}/train_balanced",
             batch_size=batch_size,
             target_size=img_dims,
             shuffle=True,
@@ -92,7 +92,7 @@ def load_data_gen(task, img_dims, seed=42, batch_size=32, shuffle=True, **kwargs
             class_mode='categorical')
         test_datagen = ImageDataGenerator(preprocessing_function=preprocess_input, validation_split=0.1)
         validation_generator = test_datagen.flow_from_directory(
-            f"{data_fldr}/train",
+            f"{data_fldr}/train_balanced",
             batch_size=batch_size,
             target_size=img_dims,
             shuffle=False,

@@ -9,7 +9,7 @@ import torch
 from tensorflow import keras
 from tensorflow.keras.applications import ResNet50
 from tensorflow.keras import Model
-from tensorflow.keras.layers import Input, Dense, Flatten, AveragePooling2D, Dropout
+from tensorflow.keras.layers import Input, Dense, Flatten, AveragePooling2D, Dropout, BatchNormalization
 # from tensorflow.keras.layers import Dense, Flatten, Conv2D, MaxPool2D, BatchNormalization, Dropout
 # from tensorflow.keras.models import Sequential
 # from tensorflow.python.keras.utils.conv_utils import normalize_tuple
@@ -38,7 +38,7 @@ reset_random()
 
 
 if __name__ == "__main__":
-    import json
+    exp_name = "undersamp_long_run_small_lr"
 
     # EXPERIMENT CONFIG #
     # save = False
@@ -90,9 +90,11 @@ if __name__ == "__main__":
     # https://www.pyimagesearch.com/2020/04/27/fine-tuning-resnet-with-keras-tensorflow-and-deep-learning/
 
     class_model = resnet.output
+    class_model = BatchNormalization()(class_model)
     class_model = AveragePooling2D(pool_size=(7, 7))(class_model)
     class_model = Flatten(name="flatten")(class_model)
     class_model = Dense(256, activation="relu")(class_model)
+    class_model = BatchNormalization()(class_model)
     class_model = Dropout(0.5)(class_model)
     class_model = Dense(10, activation="softmax")(class_model)
 
@@ -102,18 +104,21 @@ if __name__ == "__main__":
     # (train_data, val_data, test_data) = load_data.load_data_gen(task=2, img_dims=244)
     # second run - balancing classes via weights and augmenting data to fight overfitting, updating batch size:
     BATCH_SIZE = 124
-    class_weight = {
-        0: 1.,
-        1: 1.,
-        2: 1.,
-        3: 1.,
-        4: 1.73,
-        5: 1.,
-        6: 1.,
-        7: 1.,
-        8: 1.,
-        9: 1.,
-    }
+
+    # third run - balanced dataset by undersampling, only
+    # BATCH_SIZE = 32
+    # class_weight = {
+    #     0: 1.,
+    #     1: 1.,
+    #     2: 1.,
+    #     3: 1.,
+    #     4: 1.73,
+    #     5: 1.,
+    #     6: 1.,
+    #     7: 1.,
+    #     8: 1.,
+    #     9: 1.,
+    # }
     data_gen_params = {
         "rotation_range": 40,
         "width_shift_range": 0.2,
@@ -124,6 +129,8 @@ if __name__ == "__main__":
     }
     (train_data, val_data, test_data) = load_data.load_data_gen(task=2, img_dims=244, batch_size=BATCH_SIZE, **data_gen_params)
 
+    early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=25, restore_best_weights=True)
+
     opt = tf.keras.optimizers.Adam(lr=2e-5)
     model.compile(optimizer=opt,
                   loss=tf.keras.losses.CategoricalCrossentropy(),
@@ -131,8 +138,9 @@ if __name__ == "__main__":
     history = model.fit(
         train_data,
         validation_data=val_data,
-        epochs=30,
-        class_weight=class_weight
+        epochs=100,
+        # class_weight=class_weight,
+        callbacks=[early_stop_callback]
     )
     # save initial model and log results
     val_result = model.evaluate(val_data)
@@ -146,7 +154,7 @@ if __name__ == "__main__":
     print(classification_report(test_data.classes, y_pred, target_names=test_data.class_indices.keys()))
     utils.plot_confusion_matrix(cm, test_data.class_indices.keys())
 
-    model.save(f"saved_models/initial_balanced")
+    model.save(f"saved_models/initial_{exp_name}")
 
     # Step 2 - unfreeze res5c block and retrain final layers and added classifier
     resnet.trainable = True
@@ -172,15 +180,19 @@ if __name__ == "__main__":
 
     # second pass - using Adam as less affected by class_weights changing range of the loss
     # ref: https://www.tensorflow.org/tutorials/structured_data/imbalanced_data#train_a_model_with_class_weights
-    model.compile(optimizer=tf.keras.optimizers.Adam(lr=1e-3),
+    model.compile(optimizer=tf.keras.optimizers.Adam(lr=1e-5),
                   loss=tf.keras.losses.CategoricalCrossentropy(),
                   metrics=['accuracy'])
+
+    train_data.reset()
+    val_data.reset()
 
     history = model.fit(
         train_data,
         validation_data=val_data,
         epochs=100,
-        class_weight=class_weight
+        # class_weight=class_weight,
+        callbacks=[early_stop_callback]
     )
 
     test_data.reset()
@@ -197,4 +209,4 @@ if __name__ == "__main__":
     print(classification_report(test_data.classes, y_pred, target_names=test_data.class_indices.keys()))
     utils.plot_confusion_matrix(cm, test_data.class_indices.keys())
 
-    model.save(f"saved_models/fine-tuned_balanced")
+    model.save(f"saved_models/fine-tuned_{exp_name}")

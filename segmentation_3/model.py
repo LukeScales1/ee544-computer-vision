@@ -71,9 +71,132 @@ class OxfordPets(keras.utils.Sequence):
         return x, y
 
 
+def get_xception_style_unet(img_size, num_classes):
+    inputs = keras.Input(shape=img_size + (3,))
+
+    ### [First half of the network: downsampling inputs] ###
+
+    # Entry block
+    x = layers.Conv2D(32, 3, strides=2, padding="same")(inputs)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation("relu")(x)
+
+    previous_block_activation = x  # Set aside residual
+
+    # Blocks 1, 2, 3 are identical apart from the feature depth.
+    for filters in [64, 128, 256]:
+        x = layers.Activation("relu")(x)
+        x = layers.SeparableConv2D(filters, 3, padding="same")(x)
+        x = layers.BatchNormalization()(x)
+
+        x = layers.Activation("relu")(x)
+        x = layers.SeparableConv2D(filters, 3, padding="same")(x)
+        x = layers.BatchNormalization()(x)
+
+        x = layers.MaxPooling2D(3, strides=2, padding="same")(x)
+
+        # Project residual
+        residual = layers.Conv2D(filters, 1, strides=2, padding="same")(
+            previous_block_activation
+        )
+        x = layers.add([x, residual])  # Add back residual
+        previous_block_activation = x  # Set aside next residual
+
+    ### [Second half of the network: upsampling inputs] ###
+
+    for filters in [256, 128, 64, 32]:
+        x = layers.Activation("relu")(x)
+        x = layers.Conv2DTranspose(filters, 3, padding="same")(x)
+        x = layers.BatchNormalization()(x)
+
+        x = layers.Activation("relu")(x)
+        x = layers.Conv2DTranspose(filters, 3, padding="same")(x)
+        x = layers.BatchNormalization()(x)
+
+        x = layers.UpSampling2D(2)(x)
+
+        # Project residual
+        residual = layers.UpSampling2D(2)(previous_block_activation)
+        residual = layers.Conv2D(filters, 1, padding="same")(residual)
+        x = layers.add([x, residual])  # Add back residual
+        previous_block_activation = x  # Set aside next residual
+
+    # Add a per-pixel classification layer
+    outputs = layers.Conv2D(num_classes, 3, activation="softmax", padding="same")(x)
+
+    # Define the model
+    model = keras.Model(inputs, outputs)
+    return model
+
+
+def conv_block(input_tensor, num_filters):
+     encoder = layers.Conv2D(num_filters, (3, 3), padding='same')(input_tensor)
+     encoder = layers.BatchNormalization()(encoder)
+     encoder = layers.Activation('relu')(encoder)
+     encoder = layers.Conv2D(num_filters, (3, 3), padding='same')(encoder)
+     encoder = layers.BatchNormalization()(encoder)
+     encoder = layers.Activation('relu')(encoder)
+     return encoder
+
+
+def encoder_block(input_tensor, num_filters):
+     encoder = conv_block(input_tensor, num_filters)
+     encoder_pool = layers.MaxPooling2D((2, 2), strides=(2, 2))(encoder)
+     return encoder_pool, encoder
+
+
+def decoder_block(input_tensor, concat_tensor, num_filters):
+    decoder = layers.Conv2DTranspose(num_filters, (2, 2), strides=(2, 2), padding='same')(input_tensor)
+    decoder = layers.concatenate([concat_tensor, decoder], axis=-1)
+    decoder = layers.BatchNormalization()(decoder)
+    decoder = layers.Activation('relu')(decoder)
+    decoder = layers.Conv2D(num_filters, (3, 3), padding='same')(decoder)
+    decoder = layers.BatchNormalization()(decoder)
+    decoder = layers.Activation('relu')(decoder)
+    decoder = layers.Conv2D(num_filters, (3, 3), padding='same')(decoder)
+    decoder = layers.BatchNormalization()(decoder)
+    decoder = layers.Activation('relu')(decoder)
+    return decoder
+
+
+def get_pauls_model(img_dims, num_classes):
+    inputs = layers.Input(shape=img_dims + (3,))
+    x = keras.layers.experimental.preprocessing.Rescaling(1.0 / 255)(inputs)
+    # 256
+    encoder0_pool, encoder0 = encoder_block(x, 32)
+    # 128
+    encoder1_pool, encoder1 = encoder_block(encoder0_pool, 64)
+    # 64
+    encoder2_pool, encoder2 = encoder_block(encoder1_pool, 128)
+    # 32
+    encoder3_pool, encoder3 = encoder_block(encoder2_pool, 256)
+    # 16
+    encoder4_pool, encoder4 = encoder_block(encoder3_pool, 512)
+    # 8
+    center = conv_block(encoder4_pool, 1024)
+    center = layers.Dropout(0.5)(center)
+    # center
+    decoder4 = decoder_block(center, encoder4, 512)
+    # 16
+    decoder3 = decoder_block(decoder4, encoder3, 256)
+    # 32
+    decoder2 = decoder_block(decoder3, encoder2, 128)
+    # 64
+    decoder1 = decoder_block(decoder2, encoder1, 64)
+    # 128
+    decoder0 = decoder_block(decoder1, encoder0, 32)
+    # 256
+    outputs = layers.Conv2D(num_classes, (1, 1), activation='softmax')(decoder0)
+    model = tf.keras.Model(inputs=inputs, outputs=outputs)
+    return model
+
+
 if __name__ == "__main__":
-    # from nvidia_unet import Unet
+    from tensorflow.keras.preprocessing.image import load_img
     from tensorflow.keras import layers, Model
+
+    # experiment_name = "xception_style_unet"
+    experiment_name = "unet_5"
 
     gpus = tf.config.list_physical_devices('GPU')
     if gpus:
@@ -90,7 +213,9 @@ if __name__ == "__main__":
     data_fldr = utils.data_fldr + "/oxford-iiit-pet"
     input_dir = f"{data_fldr}/images/"
     target_dir = f"{data_fldr}/annotations/trimaps/"
-    img_size = (128, 128)  # original U-Net dims was 572, 572 but hitting GPU OOM
+
+    epochs = 15
+    img_size = (256, 256)  # original U-Net dims was 572, 572 but hitting GPU OOM
     num_classes = 3
     batch_size = 1  # original U-Net batch size "...to make maximum use of GPU..." with large images
     PADDING = "same"  # original U-net "unpadded"
@@ -110,54 +235,57 @@ if __name__ == "__main__":
         ]
     )
 
-
-    # modified from Paul Whelan's EE544 course notes:
-    def conv_block(input_tensor, num_filters):
-        encoder = layers.Conv2D(num_filters, (3, 3), padding=PADDING)(input_tensor)
-        encoder = layers.Activation('relu')(encoder)
-        encoder = layers.Conv2D(num_filters, (3, 3), padding=PADDING)(encoder)
-        encoder = layers.Activation('relu')(encoder)
-        return encoder
+    # # train first 1000 images
+    # input_img_paths = input_img_paths[0:1000]
+    # target_img_paths = target_img_paths[0:1000]
 
 
-    def encoder_block(input_tensor, num_filters, incl_dropout=False):
-        encoder = conv_block(input_tensor, num_filters)
-        if incl_dropout:
-            encoder = layers.Dropout(0.5)(encoder)
-        encoder_pool = layers.MaxPooling2D((2, 2), strides=(2, 2))(encoder)
-        return encoder_pool, encoder
-
-
-    def center_block(input_tensor, num_filters):
-        # DROPOUT dropout_param { dropout_ratio: 0.5 } include: { phase: TRAIN }}
-        # POOLING  pooling_param { pool: MAX kernel_size: 2 stride: 2 } }
-        # ---- prev 512 conv block with dropout ^ ----
-        # CONVOLUTION  { num_output: 1024 pad: 0 ...
-        # RELU }
-        # CONVOLUTION  { num_output: 1024 pad: 0 ...
-        # RELU }
-        # DROPOUT dropout_param { dropout_ratio: 0.5 } include: { phase: TRAIN }}
-        # center = layers.Dropout(0.5)(input_tensor)
-        center = conv_block(input_tensor, num_filters)
-        center = layers.Dropout(0.5)(center)
-        return center
-
-
-    def decoder_block(input_tensor, concat_tensor, num_filters):
-        decoder = layers.UpSampling2D(2)(input_tensor)
-        decoder = layers.Conv2DTranspose(num_filters, (2, 2), strides=(2, 2), padding=PADDING)(decoder)
-        # decoder = layers.Activation('relu')(decoder)
-        decoder = layers.concatenate([concat_tensor, decoder], axis=-1)
-        # decoder = layers.Activation('relu')(decoder)  # no relu after concat in original architecture
-        decoder = layers.Conv2D(num_filters, (3, 3), padding=PADDING)(decoder)
-        decoder = layers.Activation('relu')(decoder)
-        decoder = layers.Conv2D(num_filters, (3, 3), padding=PADDING)(decoder)
-        decoder = layers.Activation('relu')(decoder)
-        return decoder
+    # # modified from Paul Whelan's EE544 course notes:
+    # def conv_block(input_tensor, num_filters):
+    #     encoder = layers.Conv2D(num_filters, (3, 3), padding=PADDING)(input_tensor)
+    #     encoder = layers.Activation('relu')(encoder)
+    #     encoder = layers.Conv2D(num_filters, (3, 3), padding=PADDING)(encoder)
+    #     encoder = layers.Activation('relu')(encoder)
+    #     return encoder
+    #
+    #
+    # def encoder_block(input_tensor, num_filters, incl_dropout=False):
+    #     encoder = conv_block(input_tensor, num_filters)
+    #     if incl_dropout:
+    #         encoder = layers.Dropout(0.5)(encoder)
+    #     encoder_pool = layers.MaxPooling2D((2, 2), strides=(2, 2))(encoder)
+    #     return encoder_pool, encoder
+    #
+    #
+    # def center_block(input_tensor, num_filters):
+    #     # DROPOUT dropout_param { dropout_ratio: 0.5 } include: { phase: TRAIN }}
+    #     # POOLING  pooling_param { pool: MAX kernel_size: 2 stride: 2 } }
+    #     # ---- prev 512 conv block with dropout ^ ----
+    #     # CONVOLUTION  { num_output: 1024 pad: 0 ...
+    #     # RELU }
+    #     # CONVOLUTION  { num_output: 1024 pad: 0 ...
+    #     # RELU }
+    #     # DROPOUT dropout_param { dropout_ratio: 0.5 } include: { phase: TRAIN }}
+    #     # center = layers.Dropout(0.5)(input_tensor)
+    #     center = conv_block(input_tensor, num_filters)
+    #     center = layers.Dropout(0.5)(center)
+    #     return center
+    #
+    #
+    # def decoder_block(input_tensor, concat_tensor, num_filters):
+    #     # decoder = layers.UpSampling2D(2)(input_tensor)
+    #     decoder = layers.Conv2DTranspose(num_filters, (2, 2), strides=(2, 2), padding=PADDING)(input_tensor)
+    #     # decoder = layers.Activation('relu')(decoder)
+    #     decoder = layers.concatenate([concat_tensor, decoder], axis=-1)
+    #     # decoder = layers.Activation('relu')(decoder)  # no relu after concat in original architecture
+    #     decoder = layers.Conv2D(num_filters, (3, 3), padding=PADDING)(decoder)
+    #     decoder = layers.Activation('relu')(decoder)
+    #     decoder = layers.Conv2D(num_filters, (3, 3), padding=PADDING)(decoder)
+    #     decoder = layers.Activation('relu')(decoder)
+    #     return decoder
 
 
     def get_model(img_size, num_classes):
-        PADDING = 'same'
         inputs = keras.Input(shape=img_size + (3,))
 
         # # inputs = layers.Conv2D(32, 3, strides=2, padding=PADDING)(inputs)
@@ -184,7 +312,7 @@ if __name__ == "__main__":
         # # # 16
         # # encoder4_pool, encoder4 = encoder_block(encoder3_pool, 512, incl_dropout=True)
         # 
-        # center = center_block(encoder3_pool, encoder3, 1024)
+        # center = center_block(encoder3_pool, 1024)
         # 
         # # decoder4 = decoder_block(center, encoder4, 512)
         # # # 16
@@ -203,7 +331,7 @@ if __name__ == "__main__":
         # # decoder0 = decoder_block(decoder1, encoder0, 32)
         # # 256
         # outputs = conv_block(decoder1, 64)(decoder1)
-        # outputs = layers.Conv2D(3, (1, 1), activation='softmax')(outputs)
+        # outputs = layers.Conv2D(3, (1, 1), activation='softmax')(decoder0)
         # 
         # 
         # # previous_block_activation = x  # Set aside residual
@@ -245,7 +373,7 @@ if __name__ == "__main__":
         # # outputs = layers.Conv2D(num_classes, 3, activation="softmax", padding="same")(x)
         # 
         # # Define the model
-        # # model = keras.Model(inputs, outputs)
+        # model = keras.Model(inputs, outputs)
         # print(outputs.summary())
         # inputs = Input(img_size)
         conv1 = layers.Conv2D(64, 3, activation='relu', padding=PADDING, kernel_initializer='he_normal')(inputs)
@@ -300,32 +428,45 @@ if __name__ == "__main__":
     keras.backend.clear_session()
 
     # Build model
-    model = get_model(img_size, num_classes)
+    # model = get_model(img_size, num_classes)
+    model = get_pauls_model(img_size, num_classes)
+    # model = get_xception_style_unet(img_size, num_classes)
 
     # model = Unet()
     import random
 
-    # Split our img paths into a training and a validation set
+    # Split our img paths into a training, validation & sets
     val_samples = 1000
+    test_samples = 500
     random.Random(1337).shuffle(input_img_paths)
     random.Random(1337).shuffle(target_img_paths)
-    train_input_img_paths = input_img_paths[:-val_samples]
-    train_target_img_paths = target_img_paths[:-val_samples]
-    val_input_img_paths = input_img_paths[-val_samples:]
-    val_target_img_paths = target_img_paths[-val_samples:]
+    train_input_img_paths = input_img_paths[:-(val_samples+test_samples)]
+    train_target_img_paths = target_img_paths[:-(val_samples+test_samples)]
+    val_input_img_paths = input_img_paths[-(val_samples+test_samples):-test_samples]
+    val_target_img_paths = target_img_paths[-(val_samples+test_samples):-test_samples]
+
+    test_input_img_paths = input_img_paths[-test_samples:]
+    test_target_img_paths = target_img_paths[-test_samples:]
 
     # Instantiate data Sequences for each split
     train_gen = OxfordPets(
         batch_size, img_size, train_input_img_paths, train_target_img_paths
     )
     val_gen = OxfordPets(batch_size, img_size, val_input_img_paths, val_target_img_paths)
-    model.compile(optimizer="SGD", loss="sparse_categorical_crossentropy")  # SGD used in original paper
+    # SGD used in original paper
+    model.compile(optimizer="SGD", loss="sparse_categorical_crossentropy",
+                  metrics=[
+                      "accuracy",
+                  ])
 
     callbacks = [
-        keras.callbacks.ModelCheckpoint("oxford_segmentation.h5", save_best_only=True)
+        keras.callbacks.ModelCheckpoint(f"{experiment_name}.h5", save_best_only=True)
     ]
 
     # Train the model, doing validation at the end of each epoch.
-    epochs = 15
-    model.fit(train_gen, epochs=epochs, validation_data=val_gen, callbacks=callbacks)
+
+    history = model.fit(train_gen, epochs=epochs, validation_data=val_gen, callbacks=callbacks)
+    model.save(f"saved_models/{experiment_name}.h5")
+
+    utils.plot_training(history)
 
