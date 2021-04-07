@@ -1,27 +1,11 @@
-import os
-import random
-from datetime import datetime
-import itertools
 
 import numpy as np
 import tensorflow as tf
 import torch
 from tensorflow import keras
-from tensorflow.keras.preprocessing.image import load_img
-from tensorflow.keras.applications import ResNet50
-from tensorflow.keras import Model
-from tensorflow.keras.layers import Input, Dense, Flatten, AveragePooling2D, Dropout
-# from tensorflow.keras.layers import Dense, Flatten, Conv2D, MaxPool2D, BatchNormalization, Dropout
-# from tensorflow.keras.models import Sequential
-# from tensorflow.python.keras.utils.conv_utils import normalize_tuple
-from sklearn.metrics import classification_report, confusion_matrix
-
-import utils
-import load_data
 
 import os
 import utils
-
 
 SEED = 42
 
@@ -194,56 +178,38 @@ def get_pauls_model(img_dims, num_classes):
     return model
 
 
-def get_charlychiu_model(img_dims):
-    concat_axis = 3
+def dice_coef_loss(target, prediction, axis=(1, 2), smooth=0.0001):
+    """
+    Sorenson (Soft) Dice loss
+    Using -log(Dice) as the loss since it is better behaved.
+    Also, the log allows avoidance of the division which
+    can help prevent underflow when the numbers are very small.
+    """
+    intersection = tf.reduce_sum(prediction * target, axis=axis)
+    p = tf.reduce_sum(prediction, axis=axis)
+    t = tf.reduce_sum(target, axis=axis)
+    numerator = tf.reduce_mean(intersection + smooth)
+    denominator = tf.reduce_mean(t + p + smooth)
+    dice_loss = -tf.math.log(2.*numerator) + tf.math.log(denominator)
 
-    inputs = Input(shape=img_dims + (3,))
-    conv1_1 = layers.Conv2D(64, (3, 3), activation='relu', padding='valid', name='conv1_1')(inputs)
-    conv1_2 = layers.Conv2D(64, (3, 3), activation='relu', padding='valid', name='conv1_2')(conv1_1)
-    pool1 = layers.MaxPooling2D(pool_size=(2, 2), name='maxpooling_1')(conv1_2)
+    return dice_loss
 
-    conv2_1 = layers.Conv2D(128, (3, 3), activation='relu', padding='valid', name='conv2_1')(pool1)
-    conv2_2 = layers.Conv2D(128, (3, 3), activation='relu', padding='valid', name='conv2_2')(conv2_1)
-    pool2 = layers.MaxPooling2D(pool_size=(2, 2), name='maxpooling_2')(conv2_2)
 
-    conv3_1 = layers.Conv2D(256, (3, 3), activation='relu', padding='valid', name='conv3_1')(pool2)
-    conv3_2 = layers.Conv2D(256, (3, 3), activation='relu', padding='valid', name='conv3_2')(conv3_1)
-    pool3 = layers.MaxPooling2D(pool_size=(2, 2), name='maxpooling_3')(conv3_2)
+def dice_coef(target, prediction, axis=(1, 2), smooth=0.0001):
+    """
+    Sorenson Dice
+    \frac{  2 \times \left | T \right | \cap \left | P \right |}{ \left | T \right | +  \left | P \right |  }
+    where T is ground truth mask and P is the prediction mask
+    """
+    prediction = keras.backend.round(prediction)  # Round to 0 or 1
 
-    conv4_1 = layers.Conv2D(512, (3, 3), activation='relu', padding='valid', name='conv4_1')(pool3)
-    conv4_2 = layers.Conv2D(512, (3, 3), activation='relu', padding='valid', name='conv4_2')(conv4_1)
-    pool4 = layers.MaxPooling2D(pool_size=(2, 2), name='maxpooling_4')(conv4_2)
+    intersection = tf.reduce_sum(target * prediction, axis=axis)
+    union = tf.reduce_sum(target + prediction, axis=axis)
+    numerator = tf.constant(2.) * intersection + smooth
+    denominator = union + smooth
+    coef = numerator / denominator
 
-    conv5_1 = layers.Conv2D(1024, (3, 3), activation='relu', padding='valid', name='conv5_1')(pool4)
-    conv5_2 = layers.Conv2D(1024, (3, 3), activation='relu', padding='valid', name='conv5_2')(conv5_1)
-
-    upsampling1 = layers.Conv2DTranspose(512, (2, 2), strides=(2, 2), padding='valid', name='upsampling1')(conv5_2)
-    crop_conv4_2 = layers.Cropping2D(cropping=((4, 4), (4, 4)), name='cropped_conv4_2')(conv4_2)
-    up6 = layers.concatenate([upsampling1, crop_conv4_2], axis=concat_axis, name='skip_connection1')
-    conv6_1 = layers.Conv2D(512, (3, 3), activation='relu', padding='valid', name='conv6_1')(up6)
-    conv6_2 = layers.Conv2D(512, (3, 3), activation='relu', padding='valid', name='conv6_2')(conv6_1)
-
-    upsampling2 = layers.Conv2DTranspose(256, (2, 2), strides=(2, 2), padding='valid', name='upsampling2')(conv6_2)
-    crop_conv3_2 = layers.Cropping2D(cropping=((16, 16), (16, 16)), name='cropped_conv3_2')(conv3_2)
-    up7 = layers.concatenate([upsampling2, crop_conv3_2], axis=concat_axis, name='skip_connection2')
-    conv7_1 = layers.Conv2D(256, (3, 3), activation='relu', padding='valid', name='conv7_1')(up7)
-    conv7_2 = layers.Conv2D(256, (3, 3), activation='relu', padding='valid', name='conv7_2')(conv7_1)
-
-    upsampling3 = layers.Conv2DTranspose(128, (2, 2), strides=(2, 2), padding='valid', name='upsampling3')(conv7_2)
-    crop_conv2_2 = layers.Cropping2D(cropping=((40, 40), (40, 40)), name='cropped_conv2_2')(conv2_2)
-    up8 = layers.concatenate([upsampling3, crop_conv2_2], axis=concat_axis, name='skip_connection3')
-    conv8_1 = layers.Conv2D(128, (3, 3), activation='relu', padding='valid', name='conv8_1')(up8)
-    conv8_2 = layers.Conv2D(128, (3, 3), activation='relu', padding='valid', name='conv8_2')(conv8_1)
-
-    upsampling4 = layers.Conv2DTranspose(64, (2, 2), strides=(2, 2), padding='valid', name='upsampling4')(conv8_2)
-    crop_conv1_2 = layers.Cropping2D(cropping=((88, 88), (88, 88)), name='cropped_conv1_2')(conv1_2)
-    up9 = layers.concatenate([upsampling4, crop_conv1_2], axis=concat_axis, name='skip_connection4')
-    conv9_1 = layers.Conv2D(64, (3, 3), activation='relu', padding='valid', name='conv9_1')(up9)
-    conv9_2 = layers.Conv2D(64, (3, 3), activation='relu', padding='valid', name='conv9_2')(conv9_1)
-
-    conv10 = layers.Conv2D(3, (1, 1), activation='softmax', name='conv10')(conv9_2)
-    model = Model(inputs=[inputs], outputs=[conv10])
-    return model
+    return tf.reduce_mean(coef)
 
 
 if __name__ == "__main__":
@@ -290,148 +256,9 @@ if __name__ == "__main__":
         ]
     )
 
-    # # train first 1000 images
-    # input_img_paths = input_img_paths[0:1000]
-    # target_img_paths = target_img_paths[0:1000]
-
-
-    # # modified from Paul Whelan's EE544 course notes:
-    # def conv_block(input_tensor, num_filters):
-    #     encoder = layers.Conv2D(num_filters, (3, 3), padding=PADDING)(input_tensor)
-    #     encoder = layers.Activation('relu')(encoder)
-    #     encoder = layers.Conv2D(num_filters, (3, 3), padding=PADDING)(encoder)
-    #     encoder = layers.Activation('relu')(encoder)
-    #     return encoder
-    #
-    #
-    # def encoder_block(input_tensor, num_filters, incl_dropout=False):
-    #     encoder = conv_block(input_tensor, num_filters)
-    #     if incl_dropout:
-    #         encoder = layers.Dropout(0.5)(encoder)
-    #     encoder_pool = layers.MaxPooling2D((2, 2), strides=(2, 2))(encoder)
-    #     return encoder_pool, encoder
-    #
-    #
-    # def center_block(input_tensor, num_filters):
-    #     # DROPOUT dropout_param { dropout_ratio: 0.5 } include: { phase: TRAIN }}
-    #     # POOLING  pooling_param { pool: MAX kernel_size: 2 stride: 2 } }
-    #     # ---- prev 512 conv block with dropout ^ ----
-    #     # CONVOLUTION  { num_output: 1024 pad: 0 ...
-    #     # RELU }
-    #     # CONVOLUTION  { num_output: 1024 pad: 0 ...
-    #     # RELU }
-    #     # DROPOUT dropout_param { dropout_ratio: 0.5 } include: { phase: TRAIN }}
-    #     # center = layers.Dropout(0.5)(input_tensor)
-    #     center = conv_block(input_tensor, num_filters)
-    #     center = layers.Dropout(0.5)(center)
-    #     return center
-    #
-    #
-    # def decoder_block(input_tensor, concat_tensor, num_filters):
-    #     # decoder = layers.UpSampling2D(2)(input_tensor)
-    #     decoder = layers.Conv2DTranspose(num_filters, (2, 2), strides=(2, 2), padding=PADDING)(input_tensor)
-    #     # decoder = layers.Activation('relu')(decoder)
-    #     decoder = layers.concatenate([concat_tensor, decoder], axis=-1)
-    #     # decoder = layers.Activation('relu')(decoder)  # no relu after concat in original architecture
-    #     decoder = layers.Conv2D(num_filters, (3, 3), padding=PADDING)(decoder)
-    #     decoder = layers.Activation('relu')(decoder)
-    #     decoder = layers.Conv2D(num_filters, (3, 3), padding=PADDING)(decoder)
-    #     decoder = layers.Activation('relu')(decoder)
-    #     return decoder
-
-
     def get_model(img_size, num_classes):
         inputs = keras.Input(shape=img_size + (3,))
         x = keras.layers.experimental.preprocessing.Rescaling(1.0 / 255)(inputs)
-
-        # # inputs = layers.Conv2D(32, 3, strides=2, padding=PADDING)(inputs)
-        # # inputs = layers.Activation("relu")(inputs)
-        # 
-        # ### [First half of the network: downsampling inputs] ###
-        # 
-        # # Entry block
-        # # x = layers.Conv2D(32, 3, strides=2, padding="same")(inputs)
-        # # x = layers.Activation("relu")(x)
-        # encoder0_pool, encoder0 = encoder_block(inputs, 64)
-        # encoder1_pool, encoder1 = encoder_block(encoder0_pool, 128)
-        # encoder2_pool, encoder2 = encoder_block(encoder1_pool, 256)
-        # encoder3_pool, encoder3 = encoder_block(encoder2_pool, 512, incl_dropout=True)
-        # # encoder4_pool, encoder4 = encoder_block(encoder3_pool, 512)
-        # 
-        # # encoder0_pool, encoder0 = encoder_block(inputs, 32)
-        # # # 128
-        # # encoder1_pool, encoder1 = encoder_block(encoder0_pool, 64)
-        # # # 64
-        # # encoder2_pool, encoder2 = encoder_block(encoder1_pool, 128)
-        # # # 32
-        # # encoder3_pool, encoder3 = encoder_block(encoder2_pool, 256)
-        # # # 16
-        # # encoder4_pool, encoder4 = encoder_block(encoder3_pool, 512, incl_dropout=True)
-        # 
-        # center = center_block(encoder3_pool, 1024)
-        # 
-        # # decoder4 = decoder_block(center, encoder4, 512)
-        # # # 16
-        # # decoder3 = decoder_block(decoder4, encoder3, 256)
-        # # # 32
-        # # decoder2 = decoder_block(decoder3, encoder2, 128)
-        # # # 64
-        # # decoder1 = decoder_block(decoder2, encoder1, 64)
-        # # # 128
-        # # decoder0 = decoder_block(decoder1, encoder0, 32)
-        # 
-        # decoder3 = decoder_block(center, encoder2, 512)
-        # decoder2 = decoder_block(decoder3, encoder1, 256)
-        # decoder1 = decoder_block(decoder2, encoder0, 128)
-        # decoder0 = decoder_block(decoder1, encoder0, 64)
-        # # decoder0 = decoder_block(decoder1, encoder0, 32)
-        # # 256
-        # outputs = conv_block(decoder1, 64)(decoder1)
-        # outputs = layers.Conv2D(3, (1, 1), activation='softmax')(decoder0)
-        # 
-        # 
-        # # previous_block_activation = x  # Set aside residual
-        # #
-        # # # Blocks 1, 2, 3 are identical apart from the feature depth.
-        # # for filters in [64, 128, 256]:
-        # #     x = layers.Conv2D(filters, 3, padding="same")(x)
-        # #     x = layers.Activation("relu")(x)
-        # #     x = layers.Conv2D(filters, 3, padding="same")(x)
-        # #     x = layers.MaxPooling2D(3, strides=2, padding="same")(x)
-        # #
-        # #     # Project residual
-        # #     residual = layers.Conv2D(filters, 1, strides=2, padding="same")(
-        # #         previous_block_activation
-        # #     )
-        # #     x = layers.add([x, residual])  # Add back residual
-        # #     previous_block_activation = x  # Set aside next residual
-        # #
-        # # ### [Second half of the network: upsampling inputs] ###
-        # #
-        # # for filters in [256, 128, 64, 32]:
-        # #     x = layers.Activation("relu")(x)
-        # #     x = layers.Conv2DTranspose(filters, 3, padding="same")(x)
-        # #     x = layers.BatchNormalization()(x)
-        # #
-        # #     x = layers.Activation("relu")(x)
-        # #     x = layers.Conv2DTranspose(filters, 3, padding="same")(x)
-        # #     x = layers.BatchNormalization()(x)
-        # #
-        # #     x = layers.UpSampling2D(2)(x)
-        # #
-        # #     # Project residual
-        # #     residual = layers.UpSampling2D(2)(previous_block_activation)
-        # #     residual = layers.Conv2D(filters, 1, padding="same")(residual)
-        # #     x = layers.add([x, residual])  # Add back residual
-        # #     previous_block_activation = x  # Set aside next residual
-        # 
-        # # Add a per-pixel classification layer
-        # # outputs = layers.Conv2D(num_classes, 3, activation="softmax", padding="same")(x)
-        # 
-        # # Define the model
-        # model = keras.Model(inputs, outputs)
-        # print(outputs.summary())
-        # inputs = Input(img_size)
         conv1 = layers.Conv2D(64, 3, activation='relu', padding=PADDING, kernel_initializer='he_normal')(x)
         conv1 = layers.Conv2D(64, 3, activation='relu', padding=PADDING, kernel_initializer='he_normal')(conv1)
         pool1 = layers.MaxPooling2D(pool_size=(2, 2))(conv1)
@@ -513,9 +340,10 @@ if __name__ == "__main__":
     # SGD used in original paper with momentum of 0.99
     # so that updates are determined by "...a large number of previously seen training examples..."
     opt = keras.optimizers.SGD(momentum=0.99)
-    model.compile(optimizer=opt, loss="sparse_categorical_crossentropy",
+    model.compile(optimizer=opt,
+                  loss=dice_coef_loss,
                   metrics=[
-                      "accuracy",
+                      dice_coef,
                   ])
 
     callbacks = [
@@ -528,4 +356,8 @@ if __name__ == "__main__":
     model.save(f"saved_models/{experiment_name}.h5")
 
     utils.plot_training(history)
+
+    test_gen = OxfordPets(batch_size, img_size, test_input_img_paths, test_target_img_paths)
+    results = model.evaluate(test_gen)
+    print(results)
 

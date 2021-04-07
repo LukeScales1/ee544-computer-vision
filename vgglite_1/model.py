@@ -66,7 +66,7 @@ def baseline_model(input_dims, n_classes, include_rescale=False):
 
 
 def build_model(input_dims, n_classes, include_rescale=False, activation_func=None, output_activation=None, 
-                dropout=True, batch_norm=True):
+                dropout=True, batch_norm=True, strides=1, dilation=1, kernel_reg=None):
     if input_dims is None:
         input_dims = (244, 244)  # default to VGG-16 input dimensions
     else:
@@ -83,32 +83,33 @@ def build_model(input_dims, n_classes, include_rescale=False, activation_func=No
         model.add(
             keras.layers.experimental.preprocessing.Rescaling(1. / 255, input_shape=(input_dims[0], input_dims[1], 1))
         )
-        model.add(Conv2D(filters=32, kernel_size=3, padding='same', activation=activation_func,
+        model.add(Conv2D(filters=32, kernel_size=3, strides=strides, dilation_rate=dilation, padding='same', activation=activation_func,
                          kernel_initializer=tf.keras.initializers.GlorotUniform(seed=SEED)))
     else:
-        model.add(Conv2D(filters=32, kernel_size=3, padding='same', activation=activation_func,
+        model.add(Conv2D(filters=32, kernel_size=3, strides=strides, dilation_rate=dilation, padding='same', activation=activation_func,
                          input_shape=(input_dims[0], input_dims[1], 1),
                          kernel_initializer=tf.keras.initializers.GlorotUniform(seed=SEED)))
     if batch_norm:
         model.add(BatchNormalization(axis=-1))
-    model.add(Conv2D(filters=32, kernel_size=3, padding='same', activation=activation_func,
+    model.add(Conv2D(filters=32, kernel_size=3, strides=strides, dilation_rate=dilation, padding='same', activation=activation_func,
                      kernel_initializer=tf.keras.initializers.GlorotUniform(seed=SEED)))
     if batch_norm:
         model.add(BatchNormalization(axis=-1))
     model.add(MaxPool2D(pool_size=(2, 2)))
     if dropout:
         model.add(Dropout(0.25, seed=SEED))
-    model.add(Conv2D(filters=64, kernel_size=3, padding='same', activation=activation_func,
+    model.add(Conv2D(filters=64, kernel_size=3, strides=strides, dilation_rate=dilation, padding='same', activation=activation_func,
                      kernel_initializer=tf.keras.initializers.GlorotUniform(seed=SEED)))
     if batch_norm:
         model.add(BatchNormalization(axis=-1))
-    model.add(Conv2D(filters=64, kernel_size=3, padding='same', activation=activation_func,
+    model.add(Conv2D(filters=64, kernel_size=3, strides=strides, dilation_rate=dilation, padding='same', activation=activation_func,
                      kernel_initializer=tf.keras.initializers.GlorotUniform(seed=SEED)))
     if batch_norm:
         model.add(BatchNormalization(axis=-1))
     model.add(MaxPool2D(pool_size=(2, 2)))
     model.add(Flatten())
-    model.add(Dense(units=512, activation=activation_func, kernel_initializer=tf.keras.initializers.GlorotUniform(seed=SEED)))
+    model.add(Dense(units=512, activation=activation_func,
+                    kernel_initializer=tf.keras.initializers.GlorotUniform(seed=SEED)))
     if batch_norm:
         model.add(BatchNormalization(axis=-1))
     if dropout:
@@ -121,14 +122,20 @@ if __name__ == "__main__":
     import json
 
     # EXPERIMENT CONFIG #
-    save = False
+    save = True
     activation = 'elu'
     output_activation = 'softmax'
     use_dropout = True
     use_batch_norm = True
-    experiment_name = "image_aug_lrschedule_elu_softmax_dropout0.25-0.5_batchnorm"
+    experiment_name = "image_aug_lrschedule_elu_softmax_dropout0.25-0.5_batchnorm_224dims_dila6"
+    input_dims = 224
+    batch_size = 6
+    strides = 1
+    dilation = 6
+    # l2_reg = 1e-4
+    l2_reg = None
 
-    epochs = 5
+    epochs = 500
     # learning_rate = 0.001
     # decay = learning_rate/epochs
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
@@ -136,8 +143,8 @@ if __name__ == "__main__":
         decay_steps=1500,
         decay_rate=0.96,
         staircase=True)
-    opt = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
-    # opt = tf.keras.optimizers.Adam()
+    # opt = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+    opt = tf.keras.optimizers.Adam()
 
     exp_stamp = f"{experiment_name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     checkpoint_filepath = f'model_checkpoints/{exp_stamp}'
@@ -152,12 +159,12 @@ if __name__ == "__main__":
     # tboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir)
     early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=100)
 
-    callbacks = []
+    callbacks = [model_checkpoint, early_stop_callback]
 
     # tf.config.set_soft_device_placement(True)
     # tf.debugging.set_log_device_placement(True)
 
-    # gpus = tf.config.list_physical_devices('GPU')
+    gpus = tf.config.list_physical_devices('GPU')
     # if gpus:
     #     # Restrict TensorFlow to only use the first GPU
     #     try:
@@ -168,16 +175,16 @@ if __name__ == "__main__":
     #         # Visible devices must be set before GPUs have been initialized
     #         print(e)
 
-    # if gpu_devices:
-    #     try:
-    #         # Currently, memory growth needs to be the same across GPUs
-    #         for gpu in gpu_devices:
-    #             tf.config.experimental.set_memory_growth(gpu, True)
-    #         logical_gpus = tf.config.experimental.list_logical_devices('GPU')
-    #         print(len(gpu_devices), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
-    #     except RuntimeError as e:
-    #         # Memory growth must be set before GPUs have been initialized
-    #         print(e)
+    if gpus:
+        try:
+            # Currently, memory growth needs to be the same across GPUs
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+        except RuntimeError as e:
+            # Memory growth must be set before GPUs have been initialized
+            print(e)
 
     data_gen_options = {
         "rotation_range": 30,
@@ -194,12 +201,19 @@ if __name__ == "__main__":
 
     reset_random()
 
-    input_dims = 32
     # (train_data, val_data, test_data) = load_data.load(input_dims)
     # model = build_model(input_dims, n_classes=len(train_data.class_names), include_rescale=True)
-    (train_data, val_data, test_data) = load_data.load_data_gen(task=1, img_dims=input_dims, seed=SEED, shuffle=True, **data_gen_options)
-    model = build_model(input_dims=input_dims, n_classes=len(train_data.class_indices.keys()),
-                        activation_func=activation, output_activation=output_activation)
+    (train_data, val_data, test_data) = load_data.load_data_gen(task=1, img_dims=input_dims, seed=SEED,
+                                                                batch_size=batch_size, shuffle=True, **data_gen_options)
+    model = build_model(
+        input_dims=input_dims,
+        n_classes=len(train_data.class_indices.keys()),
+        activation_func=activation,
+        output_activation=output_activation,
+        strides=strides,
+        dilation=dilation,
+        kernel_reg=l2_reg,
+    )
 
     model.compile(optimizer=opt,
                   loss=tf.keras.losses.CategoricalCrossentropy(),
