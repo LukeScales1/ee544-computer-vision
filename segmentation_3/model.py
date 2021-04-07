@@ -73,11 +73,11 @@ class OxfordPets(keras.utils.Sequence):
 
 def get_xception_style_unet(img_size, num_classes):
     inputs = keras.Input(shape=img_size + (3,))
-
+    x = keras.layers.experimental.preprocessing.Rescaling(1.0 / 255)(inputs)
     ### [First half of the network: downsampling inputs] ###
 
     # Entry block
-    x = layers.Conv2D(32, 3, strides=2, padding="same")(inputs)
+    x = layers.Conv2D(32, 3, strides=2, padding="same")(x)
     x = layers.BatchNormalization()(x)
     x = layers.Activation("relu")(x)
 
@@ -129,37 +129,40 @@ def get_xception_style_unet(img_size, num_classes):
     return model
 
 
-def conv_block(input_tensor, num_filters):
-     encoder = layers.Conv2D(num_filters, (3, 3), padding='same')(input_tensor)
+def conv_block(input_tensor, num_filters, padding="same"):
+     encoder = layers.Conv2D(num_filters, (3, 3), padding=padding, kernel_initializer='he_normal')(input_tensor)
      encoder = layers.BatchNormalization()(encoder)
      encoder = layers.Activation('relu')(encoder)
-     encoder = layers.Conv2D(num_filters, (3, 3), padding='same')(encoder)
+     encoder = layers.Conv2D(num_filters, (3, 3), padding=padding, kernel_initializer='he_normal')(encoder)
      encoder = layers.BatchNormalization()(encoder)
      encoder = layers.Activation('relu')(encoder)
      return encoder
 
 
-def encoder_block(input_tensor, num_filters):
-     encoder = conv_block(input_tensor, num_filters)
-     encoder_pool = layers.MaxPooling2D((2, 2), strides=(2, 2))(encoder)
-     return encoder_pool, encoder
+def encoder_block(input_tensor, num_filters, incl_dropout=False):
+    encoder = conv_block(input_tensor, num_filters)
+    if incl_dropout:
+        encoder = layers.Dropout(0.5)(encoder)
+    encoder_pool = layers.MaxPooling2D((2, 2), strides=(2, 2))(encoder)
+    return encoder_pool, encoder
 
 
-def decoder_block(input_tensor, concat_tensor, num_filters):
-    decoder = layers.Conv2DTranspose(num_filters, (2, 2), strides=(2, 2), padding='same')(input_tensor)
+def decoder_block(input_tensor, concat_tensor, num_filters, padding="same"):
+    decoder = layers.Conv2DTranspose(num_filters, (2, 2), strides=(2, 2), padding=padding, kernel_initializer='he_normal')(input_tensor)
     decoder = layers.concatenate([concat_tensor, decoder], axis=-1)
     decoder = layers.BatchNormalization()(decoder)
     decoder = layers.Activation('relu')(decoder)
-    decoder = layers.Conv2D(num_filters, (3, 3), padding='same')(decoder)
+    decoder = layers.Conv2D(num_filters, (3, 3), padding=padding, kernel_initializer='he_normal')(decoder)
     decoder = layers.BatchNormalization()(decoder)
     decoder = layers.Activation('relu')(decoder)
-    decoder = layers.Conv2D(num_filters, (3, 3), padding='same')(decoder)
+    decoder = layers.Conv2D(num_filters, (3, 3), padding=padding, kernel_initializer='he_normal')(decoder)
     decoder = layers.BatchNormalization()(decoder)
     decoder = layers.Activation('relu')(decoder)
     return decoder
 
 
 def get_pauls_model(img_dims, num_classes):
+    """Modified from Paul Whelan's code provided in EE544 course notes"""
     inputs = layers.Input(shape=img_dims + (3,))
     x = keras.layers.experimental.preprocessing.Rescaling(1.0 / 255)(inputs)
     # 256
@@ -171,7 +174,7 @@ def get_pauls_model(img_dims, num_classes):
     # 32
     encoder3_pool, encoder3 = encoder_block(encoder2_pool, 256)
     # 16
-    encoder4_pool, encoder4 = encoder_block(encoder3_pool, 512)
+    encoder4_pool, encoder4 = encoder_block(encoder3_pool, 512, incl_dropout=True)
     # 8
     center = conv_block(encoder4_pool, 1024)
     center = layers.Dropout(0.5)(center)
@@ -191,12 +194,64 @@ def get_pauls_model(img_dims, num_classes):
     return model
 
 
+def get_charlychiu_model(img_dims):
+    concat_axis = 3
+
+    inputs = Input(shape=img_dims + (3,))
+    conv1_1 = layers.Conv2D(64, (3, 3), activation='relu', padding='valid', name='conv1_1')(inputs)
+    conv1_2 = layers.Conv2D(64, (3, 3), activation='relu', padding='valid', name='conv1_2')(conv1_1)
+    pool1 = layers.MaxPooling2D(pool_size=(2, 2), name='maxpooling_1')(conv1_2)
+
+    conv2_1 = layers.Conv2D(128, (3, 3), activation='relu', padding='valid', name='conv2_1')(pool1)
+    conv2_2 = layers.Conv2D(128, (3, 3), activation='relu', padding='valid', name='conv2_2')(conv2_1)
+    pool2 = layers.MaxPooling2D(pool_size=(2, 2), name='maxpooling_2')(conv2_2)
+
+    conv3_1 = layers.Conv2D(256, (3, 3), activation='relu', padding='valid', name='conv3_1')(pool2)
+    conv3_2 = layers.Conv2D(256, (3, 3), activation='relu', padding='valid', name='conv3_2')(conv3_1)
+    pool3 = layers.MaxPooling2D(pool_size=(2, 2), name='maxpooling_3')(conv3_2)
+
+    conv4_1 = layers.Conv2D(512, (3, 3), activation='relu', padding='valid', name='conv4_1')(pool3)
+    conv4_2 = layers.Conv2D(512, (3, 3), activation='relu', padding='valid', name='conv4_2')(conv4_1)
+    pool4 = layers.MaxPooling2D(pool_size=(2, 2), name='maxpooling_4')(conv4_2)
+
+    conv5_1 = layers.Conv2D(1024, (3, 3), activation='relu', padding='valid', name='conv5_1')(pool4)
+    conv5_2 = layers.Conv2D(1024, (3, 3), activation='relu', padding='valid', name='conv5_2')(conv5_1)
+
+    upsampling1 = layers.Conv2DTranspose(512, (2, 2), strides=(2, 2), padding='valid', name='upsampling1')(conv5_2)
+    crop_conv4_2 = layers.Cropping2D(cropping=((4, 4), (4, 4)), name='cropped_conv4_2')(conv4_2)
+    up6 = layers.concatenate([upsampling1, crop_conv4_2], axis=concat_axis, name='skip_connection1')
+    conv6_1 = layers.Conv2D(512, (3, 3), activation='relu', padding='valid', name='conv6_1')(up6)
+    conv6_2 = layers.Conv2D(512, (3, 3), activation='relu', padding='valid', name='conv6_2')(conv6_1)
+
+    upsampling2 = layers.Conv2DTranspose(256, (2, 2), strides=(2, 2), padding='valid', name='upsampling2')(conv6_2)
+    crop_conv3_2 = layers.Cropping2D(cropping=((16, 16), (16, 16)), name='cropped_conv3_2')(conv3_2)
+    up7 = layers.concatenate([upsampling2, crop_conv3_2], axis=concat_axis, name='skip_connection2')
+    conv7_1 = layers.Conv2D(256, (3, 3), activation='relu', padding='valid', name='conv7_1')(up7)
+    conv7_2 = layers.Conv2D(256, (3, 3), activation='relu', padding='valid', name='conv7_2')(conv7_1)
+
+    upsampling3 = layers.Conv2DTranspose(128, (2, 2), strides=(2, 2), padding='valid', name='upsampling3')(conv7_2)
+    crop_conv2_2 = layers.Cropping2D(cropping=((40, 40), (40, 40)), name='cropped_conv2_2')(conv2_2)
+    up8 = layers.concatenate([upsampling3, crop_conv2_2], axis=concat_axis, name='skip_connection3')
+    conv8_1 = layers.Conv2D(128, (3, 3), activation='relu', padding='valid', name='conv8_1')(up8)
+    conv8_2 = layers.Conv2D(128, (3, 3), activation='relu', padding='valid', name='conv8_2')(conv8_1)
+
+    upsampling4 = layers.Conv2DTranspose(64, (2, 2), strides=(2, 2), padding='valid', name='upsampling4')(conv8_2)
+    crop_conv1_2 = layers.Cropping2D(cropping=((88, 88), (88, 88)), name='cropped_conv1_2')(conv1_2)
+    up9 = layers.concatenate([upsampling4, crop_conv1_2], axis=concat_axis, name='skip_connection4')
+    conv9_1 = layers.Conv2D(64, (3, 3), activation='relu', padding='valid', name='conv9_1')(up9)
+    conv9_2 = layers.Conv2D(64, (3, 3), activation='relu', padding='valid', name='conv9_2')(conv9_1)
+
+    conv10 = layers.Conv2D(3, (1, 1), activation='softmax', name='conv10')(conv9_2)
+    model = Model(inputs=[inputs], outputs=[conv10])
+    return model
+
+
 if __name__ == "__main__":
     from tensorflow.keras.preprocessing.image import load_img
     from tensorflow.keras import layers, Model
 
-    # experiment_name = "xception_style_unet"
-    experiment_name = "unet_5"
+    # experiment_name = "xception_style_unet_15"
+    experiment_name = "unet_init"
 
     gpus = tf.config.list_physical_devices('GPU')
     if gpus:
@@ -215,10 +270,10 @@ if __name__ == "__main__":
     target_dir = f"{data_fldr}/annotations/trimaps/"
 
     epochs = 15
-    img_size = (256, 256)  # original U-Net dims was 572, 572 but hitting GPU OOM
+    img_size = (128, 128)  # original U-Net dims was 572, 572 but hitting GPU OOM without tiling strategy
     num_classes = 3
-    batch_size = 1  # original U-Net batch size "...to make maximum use of GPU..." with large images
-    PADDING = "same"  # original U-net "unpadded"
+    batch_size = 32  # original U-Net batch size "...to make maximum use of GPU..." with large images
+    PADDING = "same"  # original U-net "unpadded" = "valid" but using "same" with input size change
 
     input_img_paths = sorted(
         [
@@ -287,6 +342,7 @@ if __name__ == "__main__":
 
     def get_model(img_size, num_classes):
         inputs = keras.Input(shape=img_size + (3,))
+        x = keras.layers.experimental.preprocessing.Rescaling(1.0 / 255)(inputs)
 
         # # inputs = layers.Conv2D(32, 3, strides=2, padding=PADDING)(inputs)
         # # inputs = layers.Activation("relu")(inputs)
@@ -376,7 +432,7 @@ if __name__ == "__main__":
         # model = keras.Model(inputs, outputs)
         # print(outputs.summary())
         # inputs = Input(img_size)
-        conv1 = layers.Conv2D(64, 3, activation='relu', padding=PADDING, kernel_initializer='he_normal')(inputs)
+        conv1 = layers.Conv2D(64, 3, activation='relu', padding=PADDING, kernel_initializer='he_normal')(x)
         conv1 = layers.Conv2D(64, 3, activation='relu', padding=PADDING, kernel_initializer='he_normal')(conv1)
         pool1 = layers.MaxPooling2D(pool_size=(2, 2))(conv1)
         conv2 = layers.Conv2D(128, 3, activation='relu', padding=PADDING, kernel_initializer='he_normal')(pool1)
@@ -429,6 +485,7 @@ if __name__ == "__main__":
 
     # Build model
     # model = get_model(img_size, num_classes)
+    # model = get_charlychiu_model(img_size)
     model = get_pauls_model(img_size, num_classes)
     # model = get_xception_style_unet(img_size, num_classes)
 
@@ -453,8 +510,10 @@ if __name__ == "__main__":
         batch_size, img_size, train_input_img_paths, train_target_img_paths
     )
     val_gen = OxfordPets(batch_size, img_size, val_input_img_paths, val_target_img_paths)
-    # SGD used in original paper
-    model.compile(optimizer="SGD", loss="sparse_categorical_crossentropy",
+    # SGD used in original paper with momentum of 0.99
+    # so that updates are determined by "...a large number of previously seen training examples..."
+    opt = keras.optimizers.SGD(momentum=0.99)
+    model.compile(optimizer=opt, loss="sparse_categorical_crossentropy",
                   metrics=[
                       "accuracy",
                   ])
